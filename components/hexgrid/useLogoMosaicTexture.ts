@@ -16,7 +16,7 @@ const TEXTURE_EDGE_BY_DETAIL: Record<PlaqueDetail, number> = {
 
 /** Fraction of the territory the content occupies, leaving a margin clear of the border. */
 const CONTAIN_RATIO = 0.82
-const MAX_DESCRIPTION_LINES = 4
+const MAX_DESCRIPTION_LINES = 6
 
 export type LogoMosaicInput = {
   name: string
@@ -173,7 +173,6 @@ export function createLogoMosaicTexture(
         height: boxHeight - markHeight - boxHeight * 0.03,
         domain: domain || name,
         description: showDescription ? description || title : '',
-        scale: boxHeight,
       })
     }
   }
@@ -238,46 +237,136 @@ function drawTextBlock(
     height: number
     domain: string
     description: string
-    scale: number
   },
 ): void {
-  const { x, y, width, height, domain, description, scale } = options
+  const { x, y, width, height, domain, description } = options
   const anchorX = x + width / 2
 
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
 
-  // Sized off the canvas height rather than a fixed pixel value, so the domain occupies the same
-  // visual share of the territory whatever resolution the tier renders at.
-  const domainSize = fontSizeToFit(ctx, domain, width, Math.max(14, scale * 0.26), 700)
+  // The domain gets a fixed share of the text area rather than a size derived from the canvas.
+  // Sizing it off the canvas made it the loudest thing on the tile and left the description with
+  // two lines and an ellipsis — a buyer paying for this space wants their sentence read, not cut.
+  const domainBand = description ? height * 0.36 : height
+  const domainSize = fitLine(ctx, domain, width, domainBand * 0.82, 700, 'Space Grotesk')
+
   ctx.font = `700 ${domainSize}px "Space Grotesk", system-ui, sans-serif`
-  ctx.fillStyle = '#FFFFFF'
   ctx.lineWidth = domainSize * 0.16
   ctx.strokeStyle = 'rgba(9,12,18,0.9)'
-  ctx.strokeText(domain, anchorX, y)
-  ctx.fillText(domain, anchorX, y)
+  ctx.strokeText(domain, anchorX, y + (domainBand - domainSize) / 2)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fillText(domain, anchorX, y + (domainBand - domainSize) / 2)
 
   if (!description) return
 
-  const bodySize = Math.max(domainSize * 0.42, scale * 0.09)
-  const lineHeight = bodySize * 1.28
-  ctx.font = `500 ${bodySize}px "Inter", system-ui, sans-serif`
+  const gap = height * 0.03
+  const bodyTop = y + domainBand + gap
+  const bodyHeight = height - domainBand - gap
+  if (bodyHeight <= 0) return
 
-  const available = height - domainSize * 1.35
-  const maxLines = Math.max(0, Math.min(MAX_DESCRIPTION_LINES, Math.floor(available / lineHeight)))
-  if (maxLines === 0) return
+  // Shrink to fit rather than cut: the largest size at which the WHOLE sentence still lands.
+  const fitted = fitParagraph(ctx, description, width, bodyHeight)
+  if (fitted.lines.length === 0) return
 
-  const lines = wrapText(ctx, description, width, maxLines)
-  let lineY = y + domainSize * 1.35
+  ctx.font = `500 ${fitted.size}px "Inter", system-ui, sans-serif`
+  const lineHeight = fitted.size * PARAGRAPH_LINE_HEIGHT
+  // Vertically centred in what's left, so a short tagline doesn't hug the logo.
+  let lineY = bodyTop + Math.max(0, (bodyHeight - fitted.lines.length * lineHeight) / 2)
 
-  for (const line of lines) {
-    ctx.lineWidth = bodySize * 0.2
+  for (const line of fitted.lines) {
+    ctx.lineWidth = fitted.size * 0.2
     ctx.strokeStyle = 'rgba(9,12,18,0.9)'
     ctx.strokeText(line, anchorX, lineY)
-    ctx.fillStyle = 'rgba(237,241,247,0.86)'
+    ctx.fillStyle = 'rgba(237,241,247,0.9)'
     ctx.fillText(line, anchorX, lineY)
     lineY += lineHeight
   }
+}
+
+/** Line spacing as a multiple of font size. Tight enough that several lines still read as a block. */
+const PARAGRAPH_LINE_HEIGHT = 1.22
+const MIN_PARAGRAPH_PX = 11
+
+/**
+ * The largest font size at which `text` wraps entirely inside the given box.
+ *
+ * Steps DOWN from a size that would fill the box until the whole sentence fits, rather than fixing
+ * a size and cutting whatever overflows. A tile is bought for the message on it; truncating that
+ * message to preserve an arbitrary font size is the wrong trade. Only if even the floor size
+ * overflows does it fall back to an ellipsis, which then affects a few words instead of half a
+ * sentence.
+ */
+export function fitParagraph(
+  ctx: Pick<CanvasRenderingContext2D, 'measureText'> & { font: string },
+  text: string,
+  maxWidth: number,
+  maxHeight: number,
+  maxLines: number = MAX_DESCRIPTION_LINES,
+): { size: number; lines: string[] } {
+  if (!text.trim() || maxWidth <= 0 || maxHeight <= 0) return { size: MIN_PARAGRAPH_PX, lines: [] }
+
+  const startSize = Math.max(MIN_PARAGRAPH_PX, Math.floor(maxHeight / PARAGRAPH_LINE_HEIGHT))
+
+  for (let size = startSize; size >= MIN_PARAGRAPH_PX; size -= 1) {
+    ctx.font = `500 ${size}px "Inter", system-ui, sans-serif`
+    const lines = wrapLines(ctx, text, maxWidth)
+    if (lines.length <= maxLines && lines.length * size * PARAGRAPH_LINE_HEIGHT <= maxHeight) {
+      return { size, lines }
+    }
+  }
+
+  // Floor size still overflows — keep as much as fits and mark the cut.
+  ctx.font = `500 ${MIN_PARAGRAPH_PX}px "Inter", system-ui, sans-serif`
+  const budget = Math.max(1, Math.floor(maxHeight / (MIN_PARAGRAPH_PX * PARAGRAPH_LINE_HEIGHT)))
+  return { size: MIN_PARAGRAPH_PX, lines: wrapText(ctx, text, maxWidth, Math.min(budget, maxLines)) }
+}
+
+/** Largest size (capped by `maxSize`) at which one line fits `maxWidth`. */
+function fitLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxSize: number,
+  weight: number,
+  family: string,
+): number {
+  for (let size = Math.floor(maxSize); size > 10; size -= 1) {
+    ctx.font = `${weight} ${size}px "${family}", system-ui, sans-serif`
+    if (ctx.measureText(text).width <= maxWidth) return size
+  }
+  return 10
+}
+
+/**
+ * Greedy word wrap with no line limit and no ellipsis.
+ *
+ * Separate from `wrapText` because fitting needs to know the true line count at a given size — a
+ * function that silently truncates cannot answer "does this fit?".
+ */
+export function wrapLines(
+  ctx: Pick<CanvasRenderingContext2D, 'measureText'>,
+  text: string,
+  maxWidth: number,
+): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0 || maxWidth <= 0) return []
+
+  const lines: string[] = []
+  let current = ''
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word
+    if (ctx.measureText(candidate).width <= maxWidth || !current) {
+      current = candidate
+      continue
+    }
+    lines.push(current)
+    current = word
+  }
+  if (current) lines.push(current)
+
+  return lines
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { wrapText } from './useLogoMosaicTexture'
+import { fitParagraph, wrapLines, wrapText } from './useLogoMosaicTexture'
 
 /**
  * Stand-in for a canvas 2D context: every character is 10 units wide, so line widths are exactly
@@ -63,5 +63,75 @@ describe('wrapText', () => {
 
   it('collapses runs of whitespace, which scraped meta tags are full of', () => {
     expect(wrapText(ctx, '  Build\n\n  things   fast  ', 1000, 4)).toEqual(['Build things fast'])
+  })
+})
+
+describe('wrapLines', () => {
+  it('reports the true line count with no limit and no ellipsis', () => {
+    // fitParagraph depends on this: a wrapper that silently truncates cannot answer
+    // "does this fit?", which is the whole question being asked.
+    const lines = wrapLines(ctx, SEE_IO_TAGLINE, 200)
+    expect(lines.length).toBeGreaterThan(4)
+    expect(lines.join(' ')).not.toContain('…')
+    expect(lines.join(' ').replace(/\s+/g, ' ')).toBe(SEE_IO_TAGLINE.replace(/\s+/g, ' '))
+  })
+
+  it('handles empty input and a zero-width box', () => {
+    expect(wrapLines(ctx, '', 200)).toEqual([])
+    expect(wrapLines(ctx, 'hello', 0)).toEqual([])
+  })
+})
+
+describe('fitParagraph', () => {
+  /** Mock with a settable font, sized so measured width scales with the declared px. */
+  function sizingCtx(): Pick<CanvasRenderingContext2D, 'measureText'> & { font: string } {
+    return {
+      font: '',
+      measureText(text: string) {
+        const px = Number(/(\d+)px/.exec(this.font)?.[1] ?? 10)
+        return { width: text.length * px * 0.5 } as TextMetrics
+      },
+    }
+  }
+
+  const OUTRANK = 'Get traffic and outrank competitors with Backlinks & SEO-optimized content while you sleep.'
+
+  it('SHRINKS to fit the whole sentence rather than cutting it', () => {
+    // The reported bug: the description rendered large and stopped at "competitors with…".
+    // Somebody paying for this space wants their sentence read.
+    const { lines } = fitParagraph(sizingCtx(), OUTRANK, 260, 150)
+    expect(lines.join(' ')).not.toContain('…')
+    expect(lines.join(' ').replace(/\s+/g, ' ')).toBe(OUTRANK)
+  })
+
+  it('never overflows the box it was given', () => {
+    for (const height of [40, 70, 110, 200]) {
+      const { size, lines } = fitParagraph(sizingCtx(), OUTRANK, 260, height)
+      expect(lines.length * size * 1.22).toBeLessThanOrEqual(height + 0.001)
+    }
+  })
+
+  it('never exceeds the line budget', () => {
+    const { lines } = fitParagraph(sizingCtx(), OUTRANK, 260, 400, 3)
+    expect(lines.length).toBeLessThanOrEqual(3)
+  })
+
+  it('uses a bigger font when there is more room', () => {
+    const tight = fitParagraph(sizingCtx(), OUTRANK, 260, 60)
+    const roomy = fitParagraph(sizingCtx(), OUTRANK, 260, 220)
+    expect(roomy.size).toBeGreaterThan(tight.size)
+  })
+
+  it('falls back to an ellipsis only when even the floor size overflows', () => {
+    // A box too small for the text at any legible size: cut a few words, not half the sentence.
+    const { lines } = fitParagraph(sizingCtx(), OUTRANK, 120, 18)
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines[lines.length - 1]).toMatch(/…$/)
+  })
+
+  it('returns nothing for empty text or a degenerate box', () => {
+    expect(fitParagraph(sizingCtx(), '', 200, 100).lines).toEqual([])
+    expect(fitParagraph(sizingCtx(), OUTRANK, 0, 100).lines).toEqual([])
+    expect(fitParagraph(sizingCtx(), OUTRANK, 200, 0).lines).toEqual([])
   })
 })

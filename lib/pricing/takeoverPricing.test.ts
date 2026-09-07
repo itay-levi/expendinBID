@@ -8,7 +8,7 @@ import {
   formatCents,
   isBidSufficient,
   isHexLocked,
-  nextVolumeTier,
+  nextTileCostCents,
   priceForBulkCluster,
   priceForSelection,
   priceForTakeover,
@@ -117,26 +117,52 @@ describe('formatCents', () => {
   })
 })
 
-describe('priceForSelection', () => {
+describe('priceForSelection — escalating land grab', () => {
   const unowned = { ownerId: null, lastPricePaidCents: BASE_HEX_PRICE_CENTS }
   const owned = { ownerId: 'rival.com', lastPricePaidCents: 2_000 }
 
-  it('prices an arbitrary count, not just 1 / 7 / 19', () => {
-    // The bug this replaces: any selection that was not exactly one hex or a perfect ring was
-    // rejected outright as "not a valid cluster", so four tiles could not be bought at all.
-    for (const count of [1, 2, 3, 4, 5, 6, 8, 13, 20, 77]) {
-      const price = priceForSelection(Array.from({ length: count }, () => unowned))
-      expect(price.totalCents).toBeGreaterThan(0)
-    }
+  it('charges 1x, 2x, 3x, 4x down the claim', () => {
+    // The model, exactly as specified: four tiles of open ground at $10 base cost
+    // $10 + $20 + $30 + $40 = $100, not $40.
+    const price = priceForSelection(Array.from({ length: 4 }, () => unowned))
+    expect(price.lines.map((line) => line.multiplier)).toEqual([1, 2, 3, 4])
+    expect(price.totalCents).toBe(BASE_HEX_PRICE_CENTS * (1 + 2 + 3 + 4))
+    expect(price.totalCents).toBe(100_00)
   })
 
-  it('sums per-hex prices, mixing unclaimed and takeover targets', () => {
-    const price = priceForSelection([unowned, owned])
-    expect(price.subtotalCents).toBe(BASE_HEX_PRICE_CENTS + 3_000) // 2000 * 1.5
+  it('grows faster than linearly, which is the whole point', () => {
+    const one = priceForSelection([unowned]).totalCents
+    const ten = priceForSelection(Array.from({ length: 10 }, () => unowned)).totalCents
+    expect(ten).toBeGreaterThan(one * 10)
+    expect(ten).toBe(BASE_HEX_PRICE_CENTS * 55) // 1+2+...+10
   })
 
-  it('always costs more in absolute terms as the selection grows', () => {
-    // The rule that has to hold across every discount boundary: more ground is never cheaper.
+  it('reports the premium separately from the flat rate', () => {
+    const price = priceForSelection(Array.from({ length: 4 }, () => unowned))
+    expect(price.flatCents).toBe(BASE_HEX_PRICE_CENTS * 4)
+    expect(price.escalationCents).toBe(price.totalCents - price.flatCents)
+    expect(price.escalationCents).toBeGreaterThan(0)
+  })
+
+  it('charges more for a rival tile than for open ground', () => {
+    // A takeover starts from 1.5x what the current owner paid, so contested ground is always
+    // dearer than settling empty space, and gets dearer each time it changes hands.
+    expect(priceForSelection([owned]).totalCents).toBeGreaterThan(priceForSelection([unowned]).totalCents)
+    expect(priceForSelection([owned]).lines[0]?.isTakeover).toBe(true)
+    expect(priceForSelection([unowned]).lines[0]?.isTakeover).toBe(false)
+  })
+
+  it('prices a basket the same however it was clicked', () => {
+    // Order-independence matters commercially: without it a buyer could shuffle their selection
+    // to land the expensive tiles on the low multipliers and pay less for the same ground.
+    const a = priceForSelection([owned, unowned, unowned])
+    const b = priceForSelection([unowned, owned, unowned])
+    const c = priceForSelection([unowned, unowned, owned])
+    expect(a.totalCents).toBe(b.totalCents)
+    expect(b.totalCents).toBe(c.totalCents)
+  })
+
+  it('always costs more as the claim grows', () => {
     let previous = 0
     for (let count = 1; count <= 60; count += 1) {
       const { totalCents } = priceForSelection(Array.from({ length: count }, () => unowned))
@@ -145,23 +171,10 @@ describe('priceForSelection', () => {
     }
   })
 
-  it('improves the effective rate as the basket grows, without ever reaching the top tier', () => {
-    // Marginal, not flat: the headline 20% applies only to tiles past the 50th, so the blended
-    // rate across the whole basket approaches it from below and never equals it.
-    const rate = (count: number) => priceForSelection(Array.from({ length: count }, () => unowned)).discountRate
-    expect(rate(2)).toBe(0)
-    expect(rate(3)).toBeGreaterThan(0)
-    expect(rate(10)).toBeGreaterThan(rate(3))
-    expect(rate(60)).toBeGreaterThan(rate(20))
-    expect(rate(500)).toBeLessThan(0.2)
-  })
-
-  it('stays monotonic even when tile prices vary wildly', () => {
-    // Mixed cheap unclaimed ground and expensive takeover targets, which is what a real basket
-    // looks like once a map has been played on.
-    const pool = [unowned, owned, { ownerId: 'x.com', lastPricePaidCents: 90_000 }, unowned, owned]
+  it('stays monotonic with mixed cheap and expensive tiles', () => {
+    const pool = [unowned, owned, { ownerId: 'x.com', lastPricePaidCents: 90_000 }, unowned]
     let previous = 0
-    for (let count = 1; count <= 40; count += 1) {
+    for (let count = 1; count <= 30; count += 1) {
       const hexes = Array.from({ length: count }, (_, i) => pool[i % pool.length] as typeof unowned)
       const { totalCents } = priceForSelection(hexes)
       expect(totalCents).toBeGreaterThan(previous)
@@ -169,19 +182,14 @@ describe('priceForSelection', () => {
     }
   })
 
-  it('reports the next tier to reach, and null at the top', () => {
-    expect(nextVolumeTier(1)?.minHexes).toBe(3)
-    expect(nextVolumeTier(5)?.minHexes).toBe(7)
-    expect(nextVolumeTier(20)?.minHexes).toBe(50)
-    expect(nextVolumeTier(50)).toBeNull()
+  it('quotes what one more tile of open ground would add', () => {
+    expect(nextTileCostCents(0)).toBe(BASE_HEX_PRICE_CENTS)
+    expect(nextTileCostCents(3)).toBe(BASE_HEX_PRICE_CENTS * 4)
   })
 
   it('handles an empty selection', () => {
-    expect(priceForSelection([])).toEqual({
-      subtotalCents: 0,
-      discountCents: 0,
-      totalCents: 0,
-      discountRate: 0,
-    })
+    const price = priceForSelection([])
+    expect(price.totalCents).toBe(0)
+    expect(price.lines).toEqual([])
   })
 })

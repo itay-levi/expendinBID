@@ -116,6 +116,13 @@ export function createPostgresHexRepository(db: Database = getDatabase()): HexRe
       return rows.map(rowToHexTile)
     },
 
+    async hasAnyTerritory(empireId) {
+      // LIMIT 1 on the owner index: existence, not a count. Counting an empire's whole holding
+      // to answer a yes/no question gets slower as the biggest empires grow.
+      const { rows } = await db.query('SELECT 1 FROM hexes WHERE owner_id = $1 LIMIT 1', [empireId])
+      return rows.length > 0
+    },
+
     async recordTakeover(entry) {
       await db.query(
         `INSERT INTO takeover_events (hex_q, hex_r, attacker_empire_id, defender_empire_id, price_paid_cents)

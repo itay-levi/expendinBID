@@ -6,6 +6,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import { useLogoMosaicTexture } from './useLogoMosaicTexture'
 import { axialToPixel, type AxialCoord } from '@/lib/hex/hexMath'
 import { buildClusterMosaicGeometry, clusterWorldBounds } from '@/lib/hex/hexGeometry'
+import { focusForCluster } from '@/lib/hex/clusterFootprint'
 import { hexIdFor } from '@/lib/hex/hexIdentity'
 // Single source of truth, not a local copy — see lib/hex/mapConfig.ts.
 import { HEX_SIZE } from '@/lib/hex/mapConfig'
@@ -61,12 +62,20 @@ function BrandHexTileImpl({ cluster, empire, isContested, onHexHover, onHexSelec
   const territoryDepth = bounds.maxZ - bounds.minZ
 
   // The mark spans the whole territory, so its shape is the territory's shape.
+  // `detail` gates how much the territory can carry: the mark alone on a single hex, the domain
+  // beneath it once there is room, and the scraped description under that on a large holding.
+  const placement = useMemo(() => focusForCluster(cluster, bounds), [cluster, bounds])
+
   const mosaicTexture = useLogoMosaicTexture({
     name: empire.name,
     domain: empire.domain,
+    title: empire.ogTitle,
+    description: empire.ogDescription,
     colorHex: empire.primaryColorHex,
     logoUrl: empire.logoUrl,
     aspect: territoryDepth > 0 ? territoryWidth / territoryDepth : 1,
+    detail: placement.detail,
+    focus: placement.focus,
   })
 
   const mosaicGeometry = useMemo(() => {

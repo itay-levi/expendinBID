@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 import { Trophy, BarChart3, HelpCircle, ChevronDown } from 'lucide-react'
 import { useGameStore, selectOwnerAt } from '@/lib/state/gameStore'
 import { resolveHexById } from '@/lib/hex/hexIdentity'
-import { priceForSelection, nextVolumeTier, PROTECTION_FEE_CENTS } from '@/lib/pricing/takeoverPricing'
-import { checkSelectionEligibility } from '@/lib/hex/selectionEligibility'
+import { priceForSelection, nextTileCostCents, PROTECTION_FEE_CENTS } from '@/lib/pricing/takeoverPricing'
+import { checkSelectionEligibility, countDisconnectedGroups } from '@/lib/hex/selectionEligibility'
 import { ELIGIBILITY_MESSAGES } from '@/lib/hex/territoryEligibility'
 import { axialKey } from '@/lib/hex/hexMath'
 import { ClaimBar } from '@/components/claim/ClaimBar'
@@ -56,28 +56,41 @@ export function BottomDashboard({ hallOfFameEntries, onConquer }: BottomDashboar
    * built outward stays valid. Per hex rather than one pass/fail, because with a multi-hex basket
    * "something is unreachable" is useless without saying how much.
    */
-  const blockedCount = useMemo(() => {
+  /**
+   * Separate patches of map this claim covers. Each is its own billboard and each is charged for —
+   * scattering is allowed, it just isn't free. See lib/pricing/takeoverPricing.ts.
+   */
+  const billboardCount = useMemo(
+    () => countDisconnectedGroups(selectedHexes.map((hex) => hex.coord)),
+    [selectedHexes],
+  )
+
+  /** Only tiles buried inside a rival's territory are refused — you fight to a border first. */
+  const blockedReason = useMemo(() => {
+    if (selectedHexes.length === 0) return null
     const allKeys = new Set(selectedHexes.map((hex) => axialKey(hex.coord)))
-    return selectedHexes.filter((hex) => {
-      // Checked against the basket *minus itself* — a hex can't be its own route in.
+    const unreachable = selectedHexes.filter((hex) => {
+      // Checked against the basket *minus itself* — a tile can't be its own route in.
       const others = new Set(allKeys)
       others.delete(axialKey(hex.coord))
       return !checkSelectionEligibility(
         hex.coord,
         (coord) => selectOwnerAt({ ownedHexes }, coord),
         myEmpireId,
-        others,
+        { selectedKeys: others },
       ).eligible
-    }).length
+    })
+    if (unreachable.length === 0) return null
+    return `${unreachable.length} tile${unreachable.length === 1 ? '' : 's'} — ${ELIGIBILITY_MESSAGES.blocked}`
   }, [selectedHexes, ownedHexes, myEmpireId])
 
-  const blockedReason =
-    blockedCount > 0 ? `${blockedCount} unreachable — ${ELIGIBILITY_MESSAGES.blocked}` : null
-
   // The SAME function the server charges with, so the previewed total and the amount taken can
-  // never disagree. See lib/pricing/takeoverPricing.ts.
-  const price = useMemo(() => priceForSelection(selectedHexes), [selectedHexes])
-  const nextTier = nextVolumeTier(selectedHexes.length)
+  // never disagree.
+  const price = useMemo(
+    () => priceForSelection(selectedHexes, billboardCount),
+    [selectedHexes, billboardCount],
+  )
+  const nextTileCents = nextTileCostCents(selectedHexes.length)
 
   const totalCents =
     selectedHexes.length > 0 && !blockedReason
@@ -134,9 +147,10 @@ export function BottomDashboard({ hallOfFameEntries, onConquer }: BottomDashboar
         <ClaimBar
           selectedCount={selectedHexes.length}
           totalCents={totalCents}
-          subtotalCents={price.subtotalCents}
-          discountCents={price.discountCents}
-          nextTier={nextTier}
+          escalationCents={price.escalationCents}
+          spreadCents={price.spreadCents}
+          billboardCount={price.billboardCount}
+          nextTileCents={nextTileCents}
           blockedReason={blockedReason}
           protect={protect}
           onProtectChange={setProtect}

@@ -35,6 +35,8 @@ export type HexRepository = {
   getOwnedHexesInRange(bounds: HexBounds): Promise<HexTile[]>
   /** Must run inside a row-locked transaction in a real implementation — see ARCHITECTURE.md §8. */
   applyTakeover(hexId: string, updates: Partial<HexTile>): Promise<HexTile>
+  /** Whether an empire holds any tile at all — gates the one free placement (§23). */
+  hasAnyTerritory(empireId: string): Promise<boolean>
   /** Appends to the immutable takeover ledger that feeds the ticker and the market stats. */
   recordTakeover(entry: TakeoverRecord): Promise<void>
 }
@@ -101,6 +103,13 @@ export const inMemoryHexRepository: HexRepository = {
     if (updated.ownerId) memoryStore.set(hexId, updated)
     else memoryStore.delete(hexId)
     return updated
+  },
+
+  async hasAnyTerritory(empireId) {
+    for (const hex of memoryStore.values()) {
+      if (hex.ownerId === empireId) return true
+    }
+    return false
   },
 
   async recordTakeover() {

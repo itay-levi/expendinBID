@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractMeta } from './resolveBrandMetadata'
+import { extractIconCandidates, extractMeta } from './resolveBrandMetadata'
 
 const BASE = 'https://example.com/page'
 
@@ -73,5 +73,76 @@ describe('extractMeta — hostile / abusive input', () => {
   it('does not throw when og:image is an unparseable URL', () => {
     const html = `<meta property="og:image" content="ht!tp://%%%">`
     expect(() => extractMeta(html, BASE)).not.toThrow()
+  })
+})
+
+describe('extractIconCandidates — logo priority', () => {
+  // Real head from outrank.so, which is what exposed the bug: a huge social banner alongside
+  // perfectly good square icons.
+  const outrankHead = `
+    <meta property="og:image" content="https://www.outrank.so/opengraph-image.png?31d914"/>
+    <meta property="og:image:width" content="2400"/>
+    <meta property="og:image:height" content="1200"/>
+    <link rel="icon" href="/icon.png?b2cf51" type="image/png" sizes="192x192"/>
+    <link rel="apple-touch-icon" href="/apple-icon.png?84bb36" type="image/png" sizes="180x180"/>
+  `
+
+  it('prefers a square app icon over a social share banner', () => {
+    // og:image is a 2400x1200 marketing card — picking it rendered a screenshot of the homepage
+    // on the map instead of a logo.
+    const best = extractIconCandidates(outrankHead, 'https://www.outrank.so/')[0]
+    expect(best?.href).toBe('https://www.outrank.so/apple-icon.png?84bb36')
+  })
+
+  it('ranks by kind before size', () => {
+    // The 192px icon is larger than the 180px apple-touch-icon, but apple-touch-icon is by
+    // definition a designed square mark, so kind wins.
+    const ranked = extractIconCandidates(outrankHead, 'https://www.outrank.so/')
+    expect(ranked[0]?.href).toContain('apple-icon')
+    expect(ranked[1]?.href).toContain('icon.png')
+    expect(ranked[ranked.length - 1]?.href).toContain('opengraph-image')
+  })
+
+  it('prefers the largest icon among equals', () => {
+    const head = `
+      <link rel="icon" href="/small.png" sizes="32x32"/>
+      <link rel="icon" href="/big.png" sizes="512x512"/>
+    `
+    expect(extractIconCandidates(head, 'https://x.com/')[0]?.href).toBe('https://x.com/big.png')
+  })
+
+  it('treats a scalable SVG icon as the largest available', () => {
+    const head = `
+      <link rel="icon" href="/raster.png" sizes="512x512"/>
+      <link rel="icon" href="/vector.svg" sizes="any" type="image/svg+xml"/>
+    `
+    expect(extractIconCandidates(head, 'https://x.com/')[0]?.href).toBe('https://x.com/vector.svg')
+  })
+
+  it('skips Safari mask-icons, which are monochrome silhouettes', () => {
+    const head = '<link rel="mask-icon" href="/pinned.svg" color="#000"/>'
+    expect(extractIconCandidates(head, 'https://x.com/')).toHaveLength(0)
+  })
+
+  it('reads href and sizes regardless of attribute order', () => {
+    const head = '<link sizes="180x180" href="/a.png" rel="apple-touch-icon"/>'
+    expect(extractIconCandidates(head, 'https://x.com/')[0]?.href).toBe('https://x.com/a.png')
+  })
+
+  it('resolves relative and root-relative hrefs against the page', () => {
+    const head = '<link rel="apple-touch-icon" href="assets/icon.png"/>'
+    expect(extractIconCandidates(head, 'https://x.com/blog/post')[0]?.href).toBe(
+      'https://x.com/blog/assets/icon.png',
+    )
+  })
+
+  it('falls back to og:image when a site publishes no icon at all', () => {
+    const head = '<meta property="og:image" content="https://x.com/card.png"/>'
+    expect(extractIconCandidates(head, 'https://x.com/')[0]?.href).toBe('https://x.com/card.png')
+  })
+
+  it('returns nothing for a head with no images, and never throws on junk hrefs', () => {
+    expect(extractIconCandidates('<title>Nothing here</title>', 'https://x.com/')).toEqual([])
+    expect(() => extractIconCandidates('<link rel="icon" href="ht tp://:::"/>', 'https://x.com/')).not.toThrow()
   })
 })

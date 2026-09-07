@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { parseTargetUrl } from '@/lib/validation/targetUrlSchema'
 import { resolveBrandMetadata } from '@/lib/brand/resolveBrandMetadata'
 import { hexIdFor } from '@/lib/hex/hexIdentity'
-import { PENDING_SELECTION_EMPIRE_ID } from '@/lib/hex/selectionEligibility'
+import {
+  PENDING_SELECTION_EMPIRE_ID,
+  checkSelectionEligibility,
+  countDisconnectedGroups,
+} from '@/lib/hex/selectionEligibility'
 import { getRepositories } from '@/lib/repository'
 import {
   requiredPriceForHex,
@@ -12,7 +16,7 @@ import {
   PROTECTION_DURATION_MS,
   assertTakeoverAllowed,
 } from '@/lib/pricing/takeoverPricing'
-import { checkHexEligibility, ELIGIBILITY_MESSAGES } from '@/lib/hex/territoryEligibility'
+import { ELIGIBILITY_MESSAGES } from '@/lib/hex/territoryEligibility'
 import { fingerprintHexes } from '@/lib/hex/takeoverGuard'
 import { axialKey } from '@/lib/hex/hexMath'
 import { createPaddleTransaction, readPaddleConfig } from '@/lib/payments/paddleClient'
@@ -94,19 +98,26 @@ export async function POST(request: Request): Promise<Response> {
   const basketOwner = acquiringEmpire?.id ?? PENDING_SELECTION_EMPIRE_ID
   const basketKeys = new Set(foundHexes.map((hex) => axialKey(hex.coord)))
 
+  // ONE CAPITAL, THEN GROW. Enforced here and not merely previewed on the client, because the
+  // client gate is a convenience and a direct POST would otherwise walk straight past it. Without
+  // this, a buyer could scatter isolated tiles across the map and collect one full-size logo per
+  // tile — strictly more advertising presence than a connected block of the same size and price.
+  // See lib/hex/selectionEligibility.ts.
+  // Scattering is allowed and charged for, not refused: each separate patch is its own billboard.
+  // Computed server-side so the premium cannot be dodged by a hand-rolled request.
+  const billboardCount = countDisconnectedGroups(foundHexes.map((hex) => hex.coord))
+
   for (const hex of foundHexes) {
     if (acquiringEmpire && hex.ownerId === acquiringEmpire.id) {
       return NextResponse.json({ success: false, error: 'You already control this hex' }, { status: 409 })
     }
-    const eligibility = checkHexEligibility(
+    const others = new Set(basketKeys)
+    others.delete(axialKey(hex.coord))
+    const eligibility = checkSelectionEligibility(
       hex.coord,
-      (coord) => {
-        const key = axialKey(coord)
-        // A hex is not its own route in.
-        if (key !== axialKey(hex.coord) && basketKeys.has(key)) return basketOwner
-        return neighborOwners.get(hexIdFor(coord)) ?? null
-      },
-      basketOwner,
+      (coord) => neighborOwners.get(hexIdFor(coord)) ?? null,
+      acquiringEmpire?.id ?? null,
+      { selectedKeys: others },
     )
     if (!eligibility.eligible) {
       return NextResponse.json({ success: false, error: ELIGIBILITY_MESSAGES[eligibility.reason] }, { status: 409 })
@@ -117,7 +128,7 @@ export async function POST(request: Request): Promise<Response> {
   // more ground always costs more — see lib/pricing/takeoverPricing.ts. The previous rule rejected
   // anything that was not exactly one tile or a perfect 7/19 ring, which made a four-tile claim
   // impossible to buy.
-  const selectionPrice = priceForSelection(foundHexes)
+  const selectionPrice = priceForSelection(foundHexes, billboardCount)
   const amountCents =
     selectionPrice.totalCents + (parsedBody.data.protect ? PROTECTION_FEE_CENTS * foundHexes.length : 0)
 

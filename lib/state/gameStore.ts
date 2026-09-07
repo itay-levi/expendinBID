@@ -183,3 +183,15 @@ export function selectHexById(state: Pick<GameState, 'ownedHexes'>, hexId: strin
 export function selectOwnerAt(state: Pick<GameState, 'ownedHexes'>, coord: AxialCoord): string | null {
   return state.ownedHexes.get(hexIdFor(coord))?.ownerId ?? null
 }
+
+/** True when this empire holds at least one tile — gates the one free placement. */
+export function selectHasTerritory(
+  state: Pick<GameState, 'ownedHexes'>,
+  empireId: string | null,
+): boolean {
+  if (!empireId) return false
+  for (const hex of state.ownedHexes.values()) {
+    if (hex.ownerId === empireId) return true
+  }
+  return false
+}

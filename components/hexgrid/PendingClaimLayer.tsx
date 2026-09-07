@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { coordFromHexId } from '@/lib/hex/hexIdentity'
 import { buildClusterMosaicGeometry, clusterWorldBounds } from '@/lib/hex/hexGeometry'
 import { clusterCoordsByAdjacency } from '@/lib/hex/clusterHexes'
+import { focusForCluster } from '@/lib/hex/clusterFootprint'
 import { axialKey } from '@/lib/hex/hexMath'
 import { HEX_SIZE } from '@/lib/hex/mapConfig'
 import { useGameStore } from '@/lib/state/gameStore'
@@ -54,13 +55,19 @@ function PendingClusterMark({ cluster, brand }: { cluster: AxialCoord[]; brand: 
   const width = bounds.maxX - bounds.minX
   const depth = bounds.maxZ - bounds.minZ
 
+  const placement = useMemo(() => focusForCluster(cluster, bounds), [cluster, bounds])
+
   const mosaicTexture = useLogoMosaicTexture({
     name: brand.domain,
     domain: brand.domain,
+    title: brand.title,
+    description: brand.description,
     // The selection colour, so a preview never reads as a settled claim.
     colorHex: '#00FF87',
     logoUrl: brand.logoUrl,
     aspect: depth > 0 ? width / depth : 1,
+    detail: placement.detail,
+    focus: placement.focus,
   })
 
   const mosaicGeometry = useMemo(() => {

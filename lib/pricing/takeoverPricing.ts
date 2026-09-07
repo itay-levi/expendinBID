@@ -70,70 +70,90 @@ export function priceForBulkCluster(hexes: Array<{ ownerId: string | null; lastP
 }
 
 /**
- * Volume discount tiers: hex count -> fraction off the summed price.
+ * Premium per extra billboard, as a fraction of the escalated subtotal.
  *
- * Ordered largest-threshold-first so the first match is the best applicable rate.
+ * A claim spread across five separate patches of map is five billboards, not one. Each renders its
+ * own full-size logo in its own part of the screen, which is strictly more visibility than the same
+ * tile count packed together — so it costs more. At 35% per extra placement, four scattered tiles
+ * cost roughly twice what four adjacent ones do.
  */
-export const VOLUME_TIERS: ReadonlyArray<{ minHexes: number; rate: number }> = [
-  { minHexes: 50, rate: 0.2 },
-  { minHexes: 19, rate: 0.15 },
-  { minHexes: 7, rate: 0.1 },
-  { minHexes: 3, rate: 0.05 },
-]
-
-/** Best discount rate a selection of this size earns. 0 for small selections. */
-export function discountRateForCount(hexCount: number): number {
-  return VOLUME_TIERS.find((tier) => hexCount >= tier.minHexes)?.rate ?? 0
-}
-
-/** The next tier a buyer could reach, for the "N more for X% off" nudge. Null at the top tier. */
-export function nextVolumeTier(hexCount: number): { minHexes: number; rate: number } | null {
-  const remaining = [...VOLUME_TIERS].reverse().find((tier) => hexCount < tier.minHexes)
-  return remaining ?? null
-}
+export const SPREAD_PREMIUM_RATE = 0.35
 
 export type SelectionPrice = {
   subtotalCents: number
-  discountCents: number
+  /** What the same tiles would cost with no escalation — the baseline the premium is measured from. */
+  flatCents: number
+  /** Everything charged above the flat rate. This is the land-grab premium. */
+  escalationCents: number
+  /** Separate patches of map this claim covers — each one is its own billboard. */
+  billboardCount: number
+  /** Charged for occupying several places on the map at once. */
+  spreadCents: number
   totalCents: number
-  /** Effective rate across the whole basket, for display. Always below the top marginal tier. */
-  discountRate: number
+  /** Per-tile breakdown in charge order, so the UI can show exactly why the total is what it is. */
+  lines: Array<{ unitCents: number; multiplier: number; chargedCents: number; isTakeover: boolean }>
 }
 
 /**
- * Price for an arbitrary set of hexes.
+ * Price for a set of hexes, escalating with every tile claimed.
  *
- * ANY set — not just a single tile or a perfect 7/19 ring. Gating purchases on exact cluster shapes
- * meant a buyer who selected four tiles was told their selection was invalid, which is absurd for a
- * product whose whole proposition is "claim as much as you want".
+ * THE GAME IS THE PRICE. Each additional tile in a claim costs a multiple of its own base: the
+ * first at 1x, the second at 2x, the third at 3x. Four unclaimed tiles are therefore
+ * $10 + $20 + $30 + $40 = $100, not $40. Visibility is the product, and the price of visibility
+ * has to climb or the map gets bought out cheaply by whoever moves first.
  *
- * Discounts are MARGINAL, like tax brackets: the first two tiles are full price, the next few carry
- * the 5% rate, and so on. A flat "best tier applies to everything" rate is the obvious approach and
- * it is wrong — at 1000 cents a tile it made 19 hexes (15% off 19000 = 16150) cost less than 18
- * (10% off 18000 = 16200), so a buyer adding territory got a refund. Marginal rates are monotonic
- * by construction: every extra tile adds `price * (1 - itsRate)`, which is always positive.
+ * Two things compound:
  *
- * The single source of truth for both the client preview and the server charge — sharing this is
- * what stops the two from drifting into disagreement over what a basket costs.
+ *  - **Position in the claim.** The Nth tile costs N times its unit price.
+ *  - **Whose ground it is.** An occupied tile's unit price is already 1.5x what its current owner
+ *    paid (`requiredPriceForHex`), so taking territory off a rival is dearer than settling open
+ *    ground, and gets dearer every time it changes hands.
+ *
+ * Tiles are sorted cheapest-first before multipliers are applied, so the total depends only on
+ * WHICH tiles are claimed and never on the order they happened to be clicked in — otherwise the
+ * same basket would quote two different prices, and a buyer could shuffle their way to a discount.
+ *
+ * The single source of truth for both the client preview and the server charge.
  */
 export function priceForSelection(
   hexes: ReadonlyArray<{ ownerId: string | null; lastPricePaidCents: number }>,
+  billboardCount = 1,
 ): SelectionPrice {
-  // Descending, so the deepest marginal rates land on the cheapest tiles. Sorting also makes the
-  // price independent of the order the buyer happened to click in.
-  const prices = hexes.map(requiredPriceForHex).sort((a, b) => b - a)
+  const units = hexes
+    .map((hex) => ({ unitCents: requiredPriceForHex(hex), isTakeover: hex.ownerId !== null }))
+    .sort((a, b) => a.unitCents - b.unitCents)
 
-  let subtotalCents = 0
-  let discountCents = 0
-  prices.forEach((price, index) => {
-    subtotalCents += price
-    discountCents += Math.round(price * discountRateForCount(index + 1))
+  const lines = units.map((unit, index) => {
+    const multiplier = index + 1
+    return {
+      unitCents: unit.unitCents,
+      multiplier,
+      chargedCents: unit.unitCents * multiplier,
+      isTakeover: unit.isTakeover,
+    }
   })
+
+  const flatCents = lines.reduce((total, line) => total + line.unitCents, 0)
+  const subtotalCents = lines.reduce((total, line) => total + line.chargedCents, 0)
+
+  // Billboards beyond the first are what you pay the spread premium on. One contiguous block is
+  // one placement however large it is, so packing tiles together is always the cheaper way to buy
+  // the same amount of ground.
+  const extraBillboards = Math.max(0, (hexes.length === 0 ? 0 : billboardCount) - 1)
+  const spreadCents = Math.round(subtotalCents * extraBillboards * SPREAD_PREMIUM_RATE)
 
   return {
     subtotalCents,
-    discountCents,
-    totalCents: subtotalCents - discountCents,
-    discountRate: subtotalCents > 0 ? discountCents / subtotalCents : 0,
+    flatCents,
+    escalationCents: subtotalCents - flatCents,
+    billboardCount: hexes.length === 0 ? 0 : billboardCount,
+    spreadCents,
+    totalCents: subtotalCents + spreadCents,
+    lines,
   }
+}
+
+/** What claiming one more tile of open ground would add, for the "next tile costs X" nudge. */
+export function nextTileCostCents(currentCount: number): number {
+  return BASE_HEX_PRICE_CENTS * (currentCount + 1)
 }

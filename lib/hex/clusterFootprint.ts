@@ -1,4 +1,6 @@
-import { axialKey, hexNeighbors, type AxialCoord } from './hexMath'
+import { axialKey, axialToPixel, hexNeighbors, type AxialCoord } from './hexMath'
+import { HEX_SIZE } from './mapConfig'
+import type { ClusterBounds } from './hexGeometry'
 
 /**
  * How much of a brand mark a cluster has room to show. Driven by the cluster's *inscribed* size,
@@ -95,4 +97,73 @@ function detailForDepth(depth: number): PlaqueDetail {
  */
 export function plaqueSideForDepth(depth: number, hexSize: number): number {
   return 2 * Math.sqrt(3) * (depth - 0.5) * hexSize * 0.9
+}
+
+/**
+ * Where a cluster's mark should sit inside its bounding box, in 0..1 texture space.
+ *
+ * Two things this gets right that the obvious approaches do not.
+ *
+ * **It centres on the territory, not on a tile.** The anchor is the mean of the tile centres, which
+ * for anything larger than a single hex lands on a *seam between* tiles rather than in the middle
+ * of one. That is what makes the mark read as one image painted across the block instead of a
+ * sticker stuck on one hex.
+ *
+ * **It is sized to span several tiles.** An earlier version sized content to the clearance of the
+ * single most-interior tile, which on a compact four-tile blob — where every tile touches the
+ * outside — is under one hex across, so the logo came out tiny and shoved into a corner. That was
+ * guarding against a problem that does not exist: the mosaic mesh only covers tiles the empire
+ * owns, so a mark drawn larger than the territory is simply not painted past its edge. It cannot
+ * bleed onto a rival's ground.
+ *
+ * The size is the larger of the inscribed clearance and a share of the cluster's smaller dimension,
+ * so a fat blob gets a big mark, a single hex gets one that fits it, and a one-tile-wide chain gets
+ * a modest one — which is correct, since a thin chain genuinely has nowhere to put a large logo.
+ */
+export function focusForCluster(cluster: AxialCoord[], bounds: ClusterBounds) {
+  const footprint = computeClusterFootprint(cluster)
+  const width = bounds.maxX - bounds.minX
+  const depth = bounds.maxZ - bounds.minZ
+
+  const centres = cluster.map((coord) => axialToPixel(coord, HEX_SIZE))
+  const mean = centres.reduce(
+    (acc, point) => ({ x: acc.x + point.x / centres.length, z: acc.z + point.z / centres.length }),
+    { x: 0, z: 0 },
+  )
+
+  // A ring or a C-shape has its mean in the hollow, which belongs to somebody else. Fall back to
+  // the eroded interior tile whenever the mean is not sitting on ground this empire actually holds.
+  const nearestOwned = centres.reduce(
+    (best, point) => {
+      const distance = Math.hypot(point.x - mean.x, point.z - mean.z)
+      return distance < best.distance ? { point, distance } : best
+    },
+    { point: centres[0] as { x: number; z: number }, distance: Infinity },
+  )
+  const meanIsOnOwnedGround = nearestOwned.distance <= HEX_SIZE
+  const anchor = meanIsOnOwnedGround ? mean : axialToPixel(footprint.anchor, HEX_SIZE)
+
+  // How big the mark can be: driven by how much ground there is, capped by how thick that ground
+  // actually is.
+  //
+  // The area term (sqrt of tile count) is what lets a compact blob carry a mark spanning several
+  // tiles rather than one. The clearance cap is what stops a long chain from doing the same — and
+  // the cap has to come from the erosion depth, NOT the bounding box: a chain running diagonally
+  // spans a large box on *both* axes while being one tile wide, and sizing off that box gave it a
+  // mark eight world units across on ground that could hold one.
+  const apothem = (Math.sqrt(3) / 2) * HEX_SIZE
+  const areaRadius = Math.sqrt(cluster.length) * apothem
+  const clearanceCap = footprint.depth * Math.sqrt(3) * HEX_SIZE
+  const safeRadius = Math.min(areaRadius, clearanceCap)
+
+  return {
+    detail: footprint.detail,
+    focus: {
+      u: width > 0 ? (anchor.x - bounds.minX) / width : 0.5,
+      // Inverted to match the mosaic's own UV flip (THREE.CanvasTexture uploads with flipY on).
+      v: depth > 0 ? 1 - (anchor.z - bounds.minZ) / depth : 0.5,
+      halfU: width > 0 ? safeRadius / width : 0.5,
+      halfV: depth > 0 ? safeRadius / depth : 0.5,
+    },
+  }
 }

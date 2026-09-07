@@ -51,7 +51,7 @@ export function SelectionLayer() {
       hoveredCoord,
       (coord) => selectOwnerAt({ ownedHexes }, coord),
       myEmpireId,
-      selectedKeys,
+      { selectedKeys },
     )
     return eligibility.eligible ? HOVER_CYAN : BLOCKED_CORAL
   }, [hoveredCoord, ownedHexes, myEmpireId, selectedKeys])

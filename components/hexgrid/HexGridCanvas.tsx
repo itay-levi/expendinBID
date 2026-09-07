@@ -8,7 +8,6 @@ import { useGameStore } from '@/lib/state/gameStore'
 import { requestHoverChange } from '@/lib/state/hoverIntent'
 import { EmptyHexField } from './EmptyHexField'
 import { BrandHexTile } from './BrandHexTile'
-import { ConquestCardLayer } from './ConquestCardLayer'
 import { SelectionLayer } from './SelectionLayer'
 import { PendingClaimLayer } from './PendingClaimLayer'
 
@@ -106,7 +105,6 @@ export function HexGridCanvas() {
 
       <SelectionLayer />
       <PendingClaimLayer />
-      <ConquestCardLayer />
     </Canvas>
   )
 }

@@ -1,6 +1,6 @@
 import { hexNeighbors, type AxialCoord } from './hexMath'
 
-export type EligibilityReason = 'expansion' | 'frontier' | 'blocked'
+export type EligibilityReason = 'expansion' | 'frontier' | 'blocked' | 'disconnected'
 export type EligibilityResult = { eligible: boolean; reason: EligibilityReason }
 
 /**
@@ -37,5 +37,6 @@ export function checkHexEligibility(
 export const ELIGIBILITY_MESSAGES: Record<EligibilityReason, string> = {
   expansion: 'Adjacent to your territory',
   frontier: 'Unclaimed frontier — open to a new capital',
-  blocked: 'Not reachable — attack from a bordering hex first',
+  blocked: 'Not reachable — attack from a bordering tile first',
+  disconnected: 'Must touch your territory — you only get one starting tile',
 }

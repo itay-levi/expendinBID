@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hex Wars — attack arrow concept</title>
+<style>
+  :root {
+    --bg: #0B0E14;
+    --grid: #1E2638;
+    --grid-edge: #2A364F;
+    --cyan: #00F0FF;
+    --green: #00FF87;
+    --coral: #FF3366;
+    --text: rgba(255,255,255,.92);
+    --muted: rgba(255,255,255,.5);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header { padding: 18px 22px 10px; }
+  h1 { margin: 0 0 4px; font-size: 17px; letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 12.5px; max-width: 62ch; }
+  main { flex: 1; display: flex; gap: 20px; padding: 10px 22px 22px; flex-wrap: wrap; }
+  .stage { flex: 1 1 560px; min-width: 320px; }
+  svg { width: 100%; height: auto; display: block; touch-action: manipulation; }
+  aside { flex: 0 1 300px; min-width: 260px; display: flex; flex-direction: column; gap: 12px; }
+  .card {
+    border: 1px solid rgba(255,255,255,.09); border-radius: 14px;
+    background: rgba(15,18,26,.6); padding: 13px 14px;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: .11em; text-transform: uppercase; color: var(--muted); }
+  .legend { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; font-size: 12.5px; }
+  .legend:last-child { margin-bottom: 0; }
+  .sw { width: 15px; height: 15px; border-radius: 4px; flex: none; }
+  #readout { min-height: 92px; }
+  #readout .who { font-weight: 700; font-size: 14px; }
+  #readout .act { margin-top: 7px; font-size: 12.5px; }
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+          letter-spacing: .05em; text-transform: uppercase; }
+  .pill.visit  { background: rgba(0,240,255,.13); color: var(--cyan);  border: 1px solid rgba(0,240,255,.4); }
+  .pill.claim  { background: rgba(0,255,135,.13); color: var(--green); border: 1px solid rgba(0,255,135,.4); }
+  .pill.attack { background: rgba(255,51,102,.13); color: var(--coral); border: 1px solid rgba(255,51,102,.45); }
+  #log { font-size: 12px; color: var(--muted); max-height: 132px; overflow-y: auto; }
+  #log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  button.reset {
+    background: rgba(255,255,255,.07); color: var(--text); border: 1px solid rgba(255,255,255,.13);
+    border-radius: 9px; padding: 7px 12px; cursor: pointer; font: inherit; font-size: 12.5px;
+  }
+  button.reset:hover { border-color: var(--cyan); color: var(--cyan); }
+  .hex { cursor: pointer; }
+  .arrowHit { cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Attack arrows — interactive concept</h1>
+  <p class="sub">
+    The arrow appears <strong>only on tiles somebody already owns</strong>, and only where you could
+    actually attack. Empty ground needs no arrow: clicking it can only mean “claim”, so there is
+    nothing to disambiguate. Hover the tiles to see it.
+  </p>
+</header>
+
+<main>
+  <div class="stage"><svg id="map" viewBox="0 0 620 470" aria-label="Hex map concept"></svg></div>
+
+  <aside>
+    <div class="card" id="readout">
+      <h2>Pointer</h2>
+      <div id="ro">Hover a tile…</div>
+    </div>
+
+    <div class="card">
+      <h2>Legend</h2>
+      <div class="legend"><span class="sw" style="background:#00FF87"></span> Yours</div>
+      <div class="legend"><span class="sw" style="background:#38BDF8"></span> ORBITCACHE (rival)</div>
+      <div class="legend"><span class="sw" style="background:#1E2638;border:1px solid #2A364F"></span> Unclaimed</div>
+      <div class="legend"><span class="sw" style="background:#FF3366"></span> Attack arrow</div>
+    </div>
+
+    <div class="card">
+      <h2>Rules shown here</h2>
+      <div style="font-size:12.5px;color:var(--muted)">
+        <div style="margin-bottom:6px"><span class="pill claim">Claim</span> &nbsp;empty tile → plain click</div>
+        <div style="margin-bottom:6px"><span class="pill visit">Visit</span> &nbsp;owned tile → plain click</div>
+        <div><span class="pill attack">Attack</span> &nbsp;owned tile → the arrow only</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Actions</h2>
+      <div id="log"></div>
+      <div style="margin-top:9px"><button class="reset" id="reset">Reset</button></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const SIZE = 42, OX = 300, OY = 235
+  const svgNS = 'http://www.w3.org/2000/svg'
+  const map = document.getElementById('map')
+  const ro = document.getElementById('ro')
+  const logEl = document.getElementById('log')
+
+  // Flat-top axial → pixel, the same layout the real app uses.
+  const toPx = (q, r) => ({ x: OX + SIZE * 1.5 * q, y: OY + SIZE * Math.sqrt(3) * (q / 2 + r) })
+  const corner = (i) => ({ x: SIZE * Math.cos((Math.PI / 3) * i), y: SIZE * Math.sin((Math.PI / 3) * i) })
+  const DIRS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]]
+  const key = (q, r) => `${q},${r}`
+
+  const INITIAL = {
+    '0,0': 'you', '1,0': 'you', '0,1': 'you', '-1,1': 'you',
+    '2,0': 'rival', '2,-1': 'rival', '3,-1': 'rival',
+  }
+  let owners = { ...INITIAL }
+
+  const COORDS = []
+  for (let q = -3; q <= 4; q++) for (let r = -3; r <= 3; r++) {
+    if (Math.abs(q + r) <= 4) COORDS.push([q, r])
+  }
+
+  const log = (msg, cls) => {
+    const d = document.createElement('div')
+    d.innerHTML = `<span class="pill ${cls}">${cls}</span> ${msg}`
+    logEl.prepend(d)
+  }
+
+  /** Which of my tiles borders this one — an attack has to come FROM somewhere. */
+  const attackerFor = (q, r) =>
+    DIRS.map(([dq, dr]) => [q + dq, r + dr]).find(([aq, ar]) => owners[key(aq, ar)] === 'you')
+
+  function describe(q, r) {
+    const owner = owners[key(q, r)]
+    if (!owner) return { who: 'Unclaimed ground', act: '<span class="pill claim">Claim</span> click the tile · $10.00' }
+    if (owner === 'you') return { who: 'Your territory', act: '<span class="pill visit">—</span> already yours' }
+    const from = attackerFor(q, r)
+    return {
+      who: 'ORBITCACHE',
+      act: from
+        ? '<span class="pill visit">Visit</span> click the tile → their site<br>' +
+          '<span class="pill attack">Attack</span> click the arrow → $15.00'
+        : '<span class="pill visit">Visit</span> click the tile → their site<br>' +
+          '<span style="color:var(--muted)">No arrow: not reachable from your border.</span>',
+    }
+  }
+
+  function render() {
+    map.innerHTML = ''
+
+    for (const [q, r] of COORDS) {
+      const { x, y } = toPx(q, r)
+      const owner = owners[key(q, r)]
+      const pts = Array.from({ length: 6 }, (_, i) => {
+        const c = corner(i); return `${x + c.x},${y + c.y}`
+      }).join(' ')
+
+      const poly = document.createElementNS(svgNS, 'polygon')
+      poly.setAttribute('points', pts)
+      poly.setAttribute('class', 'hex')
+      poly.setAttribute('fill', owner === 'you' ? '#00FF87' : owner === 'rival' ? '#38BDF8' : '#1E2638')
+      poly.setAttribute('fill-opacity', owner ? '0.85' : '1')
+      poly.setAttribute('stroke', owner ? 'rgba(255,255,255,.35)' : '#2A364F')
+      poly.setAttribute('stroke-width', '2')
+
+      poly.addEventListener('mouseenter', () => {
+        const d = describe(q, r)
+        ro.innerHTML = `<div class="who">${d.who}</div><div class="act">${d.act}</div>`
+        poly.setAttribute('stroke', '#00F0FF'); poly.setAttribute('stroke-width', '3.5')
+      })
+      poly.addEventListener('mouseleave', () => {
+        poly.setAttribute('stroke', owner ? 'rgba(255,255,255,.35)' : '#2A364F')
+        poly.setAttribute('stroke-width', '2')
+      })
+      poly.addEventListener('click', () => {
+        if (!owner) { owners[key(q, r)] = 'you'; log(`claimed ${q},${r} · $10.00`, 'claim'); render() }
+        else if (owner === 'rival') log(`would open orbitcache.io`, 'visit')
+      })
+      map.appendChild(poly)
+
+      if (owner) {
+        const label = document.createElementNS(svgNS, 'text')
+        label.setAttribute('x', x); label.setAttribute('y', y + 4)
+        label.setAttribute('text-anchor', 'middle')
+        label.setAttribute('font-size', '10'); label.setAttribute('font-weight', '700')
+        label.setAttribute('fill', 'rgba(9,12,18,.75)')
+        label.setAttribute('pointer-events', 'none')
+        label.textContent = owner === 'you' ? 'YOU' : 'ORBIT'
+        map.appendChild(label)
+      }
+    }
+
+    // Arrows LAST so they sit above the tiles — and only on rival ground reachable from your border.
+    for (const [q, r] of COORDS) {
+      if (owners[key(q, r)] !== 'rival') continue
+      const from = attackerFor(q, r)
+      if (!from) continue
+
+      const a = toPx(from[0], from[1]), b = toPx(q, r)
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+      const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI
+
+      const g = document.createElementNS(svgNS, 'g')
+      g.setAttribute('transform', `translate(${mx},${my}) rotate(${ang})`)
+      g.setAttribute('class', 'arrowHit')
+
+      // Hit area deliberately larger than the drawn glyph — on touch the arrow itself is well
+      // under the 44px minimum, and this is the part most likely to feel bad on a phone.
+      const hit = document.createElementNS(svgNS, 'rect')
+      hit.setAttribute('x', -26); hit.setAttribute('y', -24)
+      hit.setAttribute('width', 52); hit.setAttribute('height', 48)
+      hit.setAttribute('fill', 'transparent')
+      g.appendChild(hit)
+
+      const glow = document.createElementNS(svgNS, 'circle')
+      glow.setAttribute('r', 19); glow.setAttribute('fill', 'rgba(255,51,102,.18)')
+      g.appendChild(glow)
+
+      const head = document.createElementNS(svgNS, 'path')
+      head.setAttribute('d', 'M -13 -11 L 10 0 L -13 11 L -7 0 Z')
+      head.setAttribute('fill', '#FF3366')
+      head.setAttribute('stroke', 'rgba(9,12,18,.65)')
+      head.setAttribute('stroke-width', '1.5')
+      g.appendChild(head)
+
+      g.addEventListener('mouseenter', () => {
+        glow.setAttribute('fill', 'rgba(255,51,102,.42)')
+        head.setAttribute('fill', '#fff')
+        ro.innerHTML = '<div class="who">Attack ORBITCACHE</div>' +
+          '<div class="act"><span class="pill attack">Attack</span> take this tile · $15.00<br>' +
+          '<span style="color:var(--muted)">Arrow points from your border into theirs.</span></div>'
+      })
+      g.addEventListener('mouseleave', () => {
+        glow.setAttribute('fill', 'rgba(255,51,102,.18)')
+        head.setAttribute('fill', '#FF3366')
+      })
+      g.addEventListener('click', (e) => {
+        e.stopPropagation()
+        owners[key(q, r)] = 'you'
+        log(`took ${q},${r} from ORBITCACHE · $15.00`, 'attack')
+        render()
+      })
+
+      map.appendChild(g)
+    }
+  }
+
+  document.getElementById('reset').addEventListener('click', () => {
+    owners = { ...INITIAL }; logEl.innerHTML = ''; render()
+  })
+
+  render()
+})()
+</script>
+</body>
+</html>

@@ -3,7 +3,6 @@
 import { useCallback, useState } from 'react'
 import { HexGridCanvas } from '@/components/hexgrid/HexGridCanvas'
 import { TopHUD } from '@/components/hud/TopHUD'
-import { MapModeIndicator } from '@/components/hud/MapModeIndicator'
 import { HexInspector } from '@/components/hud/HexInspector'
 import { BottomDashboard } from '@/components/dashboard/BottomDashboard'
 import { useGameStore } from '@/lib/state/gameStore'
@@ -96,7 +95,6 @@ export default function HexWarsPage() {
         warEndsAt={DEMO_WAR_ENDS_AT}
       />
 
-      <MapModeIndicator />
       <HexInspector />
 
       {notice && (

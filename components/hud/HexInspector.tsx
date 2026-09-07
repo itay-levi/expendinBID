@@ -28,7 +28,6 @@ export function HexInspector() {
   const empires = useGameStore((s) => s.empires)
   const selectedHexIds = useGameStore((s) => s.selectedHexIds)
   const myEmpireId = useGameStore((s) => s.myEmpireId)
-  const mapMode = useGameStore((s) => s.mapMode)
 
   const hex = hoveredHexId ? selectHexById({ ownedHexes }, hoveredHexId) : null
   const owner = hex?.ownerId ? empires.get(hex.ownerId) ?? null : null
@@ -100,10 +99,10 @@ export function HexInspector() {
         </div>
       </div>
 
-      {owner && mapMode === 'browse' ? (
+      {owner ? (
         <div className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg border border-hexwars-cyan/40 bg-hexwars-cyan/10 py-2 text-center font-display text-[10px] font-bold uppercase tracking-wide text-hexwars-cyan">
           <ExternalLink size={11} />
-          Click to visit
+          Click to visit · arrow to take
         </div>
       ) : isBlocked ? (
         <div className="mt-2.5 flex items-center justify-center gap-1.5 rounded-lg border border-hexwars-coral/30 bg-hexwars-coral/10 py-2 text-center font-display text-[10px] font-semibold uppercase tracking-wide text-hexwars-coral">

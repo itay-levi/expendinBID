@@ -20,17 +20,6 @@
 }
 
 @layer utilities {
-  /* Set by components/hud/MapModeIndicator.tsx. Styling the canvas from an attribute on <body>
-     keeps the cursor out of React entirely — passing it as a prop would re-render the whole
-     scene graph every time the mode flipped. */
-  body[data-map-mode='conquer'] canvas {
-    cursor: crosshair;
-  }
-
-  body[data-map-mode='browse'] canvas {
-    cursor: pointer;
-  }
-
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }

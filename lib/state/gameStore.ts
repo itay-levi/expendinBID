@@ -3,16 +3,6 @@ import { hexIdFor, resolveHexAt, resolveHexById } from '@/lib/hex/hexIdentity'
 import type { AxialCoord } from '@/lib/hex/hexMath'
 import type { Empire, HexTile, MarketSnapshot, TakeoverEvent } from '@/types/game'
 
-/**
- * What a click on an OWNED hex means.
- *
- * `browse` is the default and opens the owner's site, because that is the click the advertiser
- * paid for — a map that swallows clicks into a purchase flow stops delivering the product it
- * sells. `conquer` marks tiles for takeover instead. Empty hexes select in both modes; there is
- * nothing to visit on open ground.
- */
-export type MapMode = 'browse' | 'conquer'
-
 /** The brand a visitor is about to plant, resolved from their URL before they pay. */
 export type PendingBrand = {
   url: string
@@ -39,7 +29,6 @@ type GameState = {
   selectedHexIds: string[]
   /** Brand resolved from the URL in the claim bar, previewed on selected hexes before payment. */
   pendingBrand: PendingBrand | null
-  mapMode: MapMode
   myEmpireId: string | null
 }
 
@@ -48,7 +37,6 @@ type GameActions = {
   toggleHexSelection: (hexId: string) => void
   clearSelection: () => void
   setPendingBrand: (brand: PendingBrand | null) => void
-  setMapMode: (mode: MapMode) => void
   applyHexUpdate: (hex: HexTile) => void
   applyEmpireUpsert: (empire: Empire) => void
   applyTakeoverEvent: (event: TakeoverEvent) => void
@@ -92,7 +80,6 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   hoveredHexId: null,
   selectedHexIds: [],
   pendingBrand: null,
-  mapMode: 'browse',
   myEmpireId: null,
 
   setHoveredHex: (hexId) => set({ hoveredHexId: hexId }),
@@ -106,17 +93,7 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   clearSelection: () => set({ selectedHexIds: [] }),
 
-  setPendingBrand: (brand) =>
-    set((state) => ({
-      pendingBrand: brand,
-      // Arms conquer mode the first time a brand resolves: nobody types their own domain into the
-      // claim bar unless they intend to buy, so that is intent enough to switch without asking.
-      // Guarded on the null -> brand transition specifically, so someone who deliberately switches
-      // back to browsing is not re-armed on the next render.
-      mapMode: brand && !state.pendingBrand ? 'conquer' : state.mapMode,
-    })),
-
-  setMapMode: (mode) => set({ mapMode: mode }),
+  setPendingBrand: (brand) => set({ pendingBrand: brand }),
 
   applyHexUpdate: (hex) =>
     set((state) => {

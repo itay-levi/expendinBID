@@ -10,7 +10,6 @@ import { focusForCluster } from '@/lib/hex/clusterFootprint'
 import { hexIdFor } from '@/lib/hex/hexIdentity'
 // Single source of truth, not a local copy — see lib/hex/mapConfig.ts.
 import { HEX_SIZE } from '@/lib/hex/mapConfig'
-import { useGameStore } from '@/lib/state/gameStore'
 import type { Empire } from '@/types/game'
 
 const PRISM_HEIGHT = 0.34
@@ -26,7 +25,6 @@ type BrandHexTileProps = {
   empire: Empire
   isContested: boolean
   onHexHover: (hexId: string | null) => void
-  onHexSelect: (hexId: string) => void
 }
 
 /**
@@ -46,10 +44,11 @@ type BrandHexTileProps = {
  * floating card covers the very tiles a buyer is trying to click. The hover card (HexTooltip)
  * carries the readable text instead, and it is click-through for the same reason.
  *
- * Dual-interaction click model: a plain tap selects the hex, a modifier-click visits the owner's
- * actual site.
+ * Clicking one of these tiles always opens the owner's site — see the pointerUp handler. Taking
+ * territory from them is done through the attack arrows, which appear only on occupied ground
+ * because that is the only place a click would otherwise be ambiguous.
  */
-function BrandHexTileImpl({ cluster, empire, isContested, onHexHover, onHexSelect }: BrandHexTileProps) {
+function BrandHexTileImpl({ cluster, empire, isContested, onHexHover }: BrandHexTileProps) {
   const pressRef = useRef<{ x: number; y: number } | null>(null)
 
   const centers = useMemo(
@@ -133,28 +132,15 @@ function BrandHexTileImpl({ cluster, empire, isContested, onHexHover, onHexSelec
               }
               event.stopPropagation()
 
-              // What a click on somebody else's territory MEANS depends on the active mode.
+              // A click on somebody else's territory ALWAYS opens their site. That click is the
+              // product they bought, and it now has exactly one meaning everywhere on the map.
+              // Taking the tile is the attack arrow's job (AttackArrowLayer) — a separate target,
+              // so nothing has to be remembered or toggled to get the right outcome.
               //
-              // Browsing is the default and opens the owner's site, because that click is the
-              // product the advertiser bought — a map that quietly swallows it into a purchase
-              // flow is not delivering what was sold. Conquering marks the tile instead. A
-              // modifier always visits, as an escape hatch for anyone mid-purchase who wants to
-              // check out a rival without leaving conquer mode.
-              //
-              // Read at click time, not subscribed to: a mode change must not re-render every
-              // tile mesh on the map.
-              const modifierHeld =
-                event.nativeEvent.shiftKey || event.nativeEvent.metaKey || event.nativeEvent.ctrlKey
-              const mode = useGameStore.getState().mapMode
-
-              if (modifierHeld || mode === 'browse') {
-                // noopener/noreferrer matter here specifically: the destination is arbitrary,
-                // buyer-controlled, untrusted content, and without them it could reach back
-                // through window.opener and redirect the game tab.
-                window.open(empire.url, '_blank', 'noopener,noreferrer')
-                return
-              }
-              onHexSelect(hexId)
+              // noopener/noreferrer matter here specifically: the destination is arbitrary,
+              // buyer-controlled, untrusted content, and without them it could reach back through
+              // window.opener and redirect the game tab.
+              window.open(empire.url, '_blank', 'noopener,noreferrer')
             }}
             onContextMenu={(event: ThreeEvent<MouseEvent>) => {
               // Right-click as a hover fallback for touch/no-hover devices, per spec.

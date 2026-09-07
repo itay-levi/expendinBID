@@ -10,6 +10,7 @@ import { EmptyHexField } from './EmptyHexField'
 import { BrandHexTile } from './BrandHexTile'
 import { SelectionLayer } from './SelectionLayer'
 import { PendingClaimLayer } from './PendingClaimLayer'
+import { AttackArrowLayer } from './AttackArrowLayer'
 
 const ISO_DISTANCE = 24
 
@@ -98,13 +99,13 @@ export function HexGridCanvas() {
             empire={empire}
             isContested={cluster.hexes.some((hex) => hex.isContested)}
             onHexHover={requestHoverChange}
-            onHexSelect={toggleHexSelection}
           />
         )
       })}
 
       <SelectionLayer />
       <PendingClaimLayer />
+      <AttackArrowLayer />
     </Canvas>
   )
 }

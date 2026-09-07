@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-hexwars-bg text-white/90 font-body;
+  }
+
+  /* The game canvas (app/page.tsx) pins its own <main> to h-screen overflow-hidden — body itself
+     must stay scrollable, or every other route (Terms, Privacy, …) renders unscrollably clipped. */
+
+  /* Subtle hex-grid noise under the WebGL canvas, visible during load/fallback */
+  body {
+    background-image:
+      radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.06), transparent 60%),
+      repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.015) 0px, rgba(255, 255, 255, 0.015) 1px, transparent 1px, transparent 40px);
+  }
+}
+
+@layer utilities {
+  /* Set by components/hud/MapModeIndicator.tsx. Styling the canvas from an attribute on <body>
+     keeps the cursor out of React entirely — passing it as a prop would re-render the whole
+     scene graph every time the mode flipped. */
+  body[data-map-mode='conquer'] canvas {
+    cursor: crosshair;
+  }
+
+  body[data-map-mode='browse'] canvas {
+    cursor: pointer;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Respect the OS-level reduced-motion setting. The pulsing CTA and scrolling ticker run
+   indefinitely, which is exactly the kind of motion this setting exists to suppress. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

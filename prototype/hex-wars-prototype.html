@@ -1,0 +1,1582 @@
+<title>Hex Wars</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  /* Deliberately single-world dark theme: this is a themed war-room HUD, not an adaptive document. */
+  :root{
+    --bg:#0B0E14;
+    --grid:#1E2638;
+    --grid-border:#2A364F;
+    --cyan:#00F0FF;
+    --green:#00FF87;
+    --coral:#FF3366;
+    --purple:#8A2BE2;
+    --glass:rgba(15,18,26,0.60);
+    --glass-border:rgba(255,255,255,0.09);
+    --text:rgba(237,241,247,0.94);
+    --text-muted:rgba(140,153,179,0.78);
+    --text-faint:rgba(140,153,179,0.5);
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'Inter', sans-serif;
+    --font-mono:'JetBrains Mono', monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    overflow:hidden;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,240,255,0.08), transparent 60%),
+      repeating-linear-gradient(120deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 42px),
+      repeating-linear-gradient(60deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 42px);
+  }
+  h1,h2,h3{margin:0;text-wrap:balance;}
+  button{font-family:inherit;cursor:pointer;}
+  ::selection{background:rgba(0,240,255,0.3);}
+
+  .tabular{font-variant-numeric:tabular-nums;}
+
+  /* ---------- Layer 1: scene ---------- */
+  #scene-root{position:fixed;inset:0;z-index:0;background:var(--bg);}
+  #scene-root canvas{display:block;width:100%;height:100%;cursor:grab;}
+  #scene-root canvas.dragging{cursor:grabbing;}
+
+  #loading-veil{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:var(--bg);z-index:5;transition:opacity .5s ease;
+    font-family:var(--font-mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--text-faint);
+  }
+  #loading-veil.hidden{opacity:0;pointer-events:none;}
+
+  #pan-hint{
+    position:absolute;left:50%;bottom:calc(212px + 14px);transform:translateX(-50%);
+    z-index:6;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;
+    color:var(--text-muted);background:var(--glass);border:1px solid var(--glass-border);
+    padding:6px 14px;border-radius:999px;backdrop-filter:blur(10px);
+    transition:opacity .6s ease;pointer-events:none;
+  }
+  #pan-hint.hidden{opacity:0;}
+
+  /* ---------- Layer 2: top HUD ---------- */
+  .hud{
+    position:fixed;top:0;left:0;right:0;z-index:20;
+    display:flex;align-items:center;gap:20px;
+    padding:11px 20px;
+    background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border-bottom:1px solid var(--glass-border);
+    font-size:12px;
+  }
+  .hud-brand{display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:.01em;white-space:nowrap;}
+  .hud-brand .colon{color:var(--cyan);}
+  .hud-divider{width:1px;height:22px;background:var(--glass-border);flex:none;}
+
+  .hud-metric{display:flex;align-items:baseline;gap:6px;white-space:nowrap;}
+  .hud-metric .label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);}
+  .hud-metric .value{font-family:var(--font-mono);font-weight:700;font-size:13px;transition:color .3s ease;}
+  .hud-metric .value.pulse{animation:valuePulse .55s ease;}
+  @keyframes valuePulse{0%{transform:scale(1);}45%{transform:scale(1.1);color:var(--green);}100%{transform:scale(1);}}
+
+  .hud-conflicts{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+  .hud-dot{width:6px;height:6px;border-radius:50%;background:var(--coral);animation:dotPulse 1.4s ease-in-out infinite;flex:none;}
+  .hud-conflicts span{font-family:var(--font-mono);font-weight:700;font-size:11px;color:var(--coral);}
+  @keyframes dotPulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+  .hud-ticker{
+    flex:1;min-width:0;position:relative;overflow:hidden;
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+  }
+  .hud-ticker-track{display:flex;width:max-content;gap:36px;white-space:nowrap;animation:tickerScroll 26s linear infinite;}
+  .hud-ticker-track span{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);}
+  .hud-ticker-track span b{color:var(--text);font-weight:600;}
+  @keyframes tickerScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+  .hud-right{display:flex;align-items:center;gap:10px;margin-left:auto;flex:none;}
+  .hud-timer{
+    display:flex;align-items:center;gap:8px;border:1px solid var(--glass-border);background:rgba(255,255,255,.04);
+    border-radius:8px;padding:6px 12px;white-space:nowrap;
+  }
+  .hud-timer .label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);}
+  .hud-timer .value{font-family:var(--font-mono);font-weight:700;font-size:12.5px;color:var(--cyan);}
+
+  .hud-btn{
+    display:flex;align-items:center;gap:6px;border:1px solid var(--glass-border);background:transparent;
+    color:var(--text-muted);border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:500;
+    transition:border-color .15s ease,color .15s ease;white-space:nowrap;
+  }
+  .hud-btn:hover{border-color:var(--cyan);color:var(--cyan);}
+  .hud-btn.active{border-color:var(--cyan);color:var(--cyan);background:rgba(0,240,255,.08);}
+  .hud-btn svg{width:14px;height:14px;flex:none;}
+
+  /* ---------- Global feed dropdown ---------- */
+  #global-feed{
+    position:fixed;top:52px;right:20px;z-index:21;width:320px;max-height:340px;overflow-y:auto;
+    background:var(--glass);backdrop-filter:blur(16px);border:1px solid var(--glass-border);border-radius:14px;
+    box-shadow:0 20px 40px rgba(0,0,0,.4);
+    transform-origin:top right;transform:scale(.96);opacity:0;pointer-events:none;transition:transform .18s ease,opacity .18s ease;
+  }
+  #global-feed.open{transform:scale(1);opacity:1;pointer-events:auto;}
+  #global-feed h3{padding:12px 14px;font-family:var(--font-display);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);border-bottom:1px solid var(--glass-border);}
+  #global-feed-list{padding:6px 8px;display:flex;flex-direction:column;gap:2px;}
+  #global-feed-list .row{padding:7px 8px;font-size:11.5px;font-family:var(--font-mono);color:var(--text-muted);border-radius:6px;}
+  #global-feed-list .row b{color:var(--text);font-weight:600;}
+  #global-feed-list .row:hover{background:rgba(255,255,255,.04);}
+
+  /* ---------- Layer 3: bottom dashboard ---------- */
+  .dashboard{
+    position:fixed;left:0;right:0;bottom:0;z-index:20;
+    display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:12px;
+    padding:12px;
+  }
+  @media (max-width:960px){.dashboard{grid-template-columns:1fr;position:static;padding:12px;}
+    #scene-root{position:fixed;}
+  }
+
+  .panel{
+    height:212px;display:flex;flex-direction:column;
+    background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border:1px solid var(--glass-border);border-radius:16px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);
+    overflow:hidden;
+  }
+  .panel.glow-green{box-shadow:0 0 0 1px rgba(0,255,135,.32), 0 0 26px rgba(0,255,135,.2), inset 0 1px 0 rgba(255,255,255,.06);}
+  .panel.glow-cyan{box-shadow:0 0 0 1px rgba(0,240,255,.32), 0 0 26px rgba(0,240,255,.2), inset 0 1px 0 rgba(255,255,255,.06);}
+  .panel.flash-attack{animation:attackFlash 1s ease;}
+  @keyframes attackFlash{0%,100%{box-shadow:inset 0 1px 0 rgba(255,255,255,.06);}40%{box-shadow:0 0 0 1px rgba(255,51,102,.55), 0 0 32px rgba(255,51,102,.35), inset 0 1px 0 rgba(255,255,255,.06);}}
+
+  .panel h2{
+    padding:10px 14px;font-family:var(--font-display);font-size:10.5px;font-weight:700;
+    text-transform:uppercase;letter-spacing:.09em;color:var(--text-muted);
+    border-bottom:1px solid var(--glass-border);flex:none;
+  }
+  .panel-body{flex:1;min-height:0;padding:10px 14px 12px;}
+
+  /* Hall of Fame */
+  #hof-table{width:100%;border-collapse:collapse;font-size:11.5px;}
+  #hof-table thead th{text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);font-weight:500;padding-bottom:6px;}
+  #hof-table thead th:not(:first-child){text-align:right;}
+  #hof-table tbody tr{border-top:1px solid rgba(255,255,255,.06);}
+  #hof-table tbody tr.eliminated{opacity:.45;}
+  #hof-table td{padding:6px 0;}
+  #hof-table td:not(:first-child){text-align:right;font-family:var(--font-mono);}
+  .hof-rank{color:var(--text-faint);font-family:var(--font-mono);}
+  .hof-name{display:flex;align-items:center;gap:7px;font-weight:600;}
+  .hof-swatch{width:8px;height:8px;border-radius:2px;flex:none;}
+  .hof-revenue{color:var(--green);}
+
+  /* Conquer panel */
+  #conquer-form{height:100%;display:flex;flex-direction:column;gap:8px;}
+  #conquer-scroll{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding-right:2px;}
+  #bulk-select{
+    border:1px solid var(--glass-border);background:rgba(255,255,255,.045);color:var(--text-muted);
+    border-radius:9px;padding:8px 10px;font-size:11.5px;font-family:var(--font-body);width:100%;
+  }
+  #bulk-select:focus{outline:none;border-color:var(--cyan);}
+  .check-row{display:flex;align-items:flex-start;gap:7px;font-size:10.5px;color:var(--text-muted);line-height:1.4;cursor:pointer;}
+  .check-row input{margin-top:2px;flex:none;accent-color:var(--cyan);width:13px;height:13px;}
+  .consent-row{color:var(--text-faint);font-size:9.5px;}
+  .consent-row input{accent-color:var(--green);}
+  .consent-row a{color:var(--cyan);text-decoration:underline;cursor:pointer;}
+  .consent-row a:hover{text-decoration:none;}
+  #domain-input{
+    border:1px solid var(--glass-border);background:rgba(255,255,255,.045);color:var(--text);
+    border-radius:9px;padding:9px 11px;font-size:13px;font-family:var(--font-body);width:100%;
+  }
+  #domain-input::placeholder{color:var(--text-faint);}
+  #domain-input:focus{outline:none;border-color:var(--cyan);}
+  #player-badge{
+    display:flex;align-items:center;gap:8px;border:1px solid var(--glass-border);background:rgba(255,255,255,.045);
+    border-radius:9px;padding:9px 11px;font-size:12.5px;
+  }
+  #player-badge .swatch{width:10px;height:10px;border-radius:3px;background:var(--purple);flex:none;}
+  #player-badge b{font-weight:700;}
+  .target-row{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    border:1px solid var(--glass-border);background:rgba(255,255,255,.045);border-radius:9px;padding:9px 11px;font-size:12px;
+  }
+  .target-row .cost{font-family:var(--font-mono);font-weight:700;color:var(--green);font-size:13px;}
+  .target-row.blocked{border-color:rgba(255,51,102,.35);background:rgba(255,51,102,.1);}
+  .target-row.blocked .label{color:var(--coral);display:flex;align-items:center;gap:5px;}
+  .target-row.locked{border-color:rgba(0,240,255,.35);background:rgba(0,240,255,.08);}
+  .target-row.locked .label{color:var(--cyan);display:flex;align-items:center;gap:5px;}
+  #conquer-error{font-size:11px;color:var(--coral);min-height:14px;flex:none;}
+  #conquer-btn{
+    flex:none;display:flex;align-items:center;justify-content:center;gap:8px;
+    border:none;border-radius:11px;padding:11px;font-family:var(--font-display);font-weight:700;
+    font-size:13px;text-transform:uppercase;letter-spacing:.04em;
+    background:rgba(255,255,255,.06);color:var(--text-faint);transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+  }
+  #conquer-btn.ready{
+    background:var(--green);color:#04140C;cursor:pointer;
+    box-shadow:0 0 0 1px rgba(0,255,135,.4), 0 0 22px rgba(0,255,135,.35);
+    animation:ctaPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes ctaPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.018);}}
+  #conquer-btn svg{width:15px;height:15px;}
+
+  /* How it works */
+  .steps{height:100%;display:flex;align-items:center;justify-content:space-between;}
+  .step{display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;flex:1;}
+  .step-icon{
+    width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(0,240,255,.4);background:rgba(0,240,255,.08);color:var(--cyan);flex:none;
+  }
+  .step-icon svg{width:16px;height:16px;}
+  .step span{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);line-height:1.3;}
+  .step-arrow{flex:none;width:22px;height:1px;background:linear-gradient(90deg, rgba(0,240,255,.45), transparent);margin:0 2px;}
+
+  /* Market data */
+  #market-rows{height:100%;display:flex;flex-direction:column;justify-content:center;gap:10px;}
+  .market-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;}
+  .market-row .label{color:var(--text-muted);}
+  .market-row .value{font-family:var(--font-mono);font-weight:700;}
+
+  /* ---------- Legal modal ---------- */
+  #legal-modal{
+    position:fixed;inset:0;z-index:50;background:rgba(3,4,7,.7);backdrop-filter:blur(4px);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+    opacity:0;pointer-events:none;transition:opacity .15s ease;
+  }
+  #legal-modal.open{opacity:1;pointer-events:auto;}
+  #legal-modal-card{
+    position:relative;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;
+    background:var(--glass);border:1px solid var(--glass-border);border-radius:16px;
+    padding:28px 26px;backdrop-filter:blur(20px);box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  #legal-modal-title{font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px;}
+  #legal-modal-body{margin-top:14px;font-size:12.5px;line-height:1.65;color:var(--text-muted);}
+  #legal-modal-body h4{font-family:var(--font-display);font-size:12px;color:var(--cyan);margin:16px 0 4px;text-transform:uppercase;letter-spacing:.04em;}
+  #legal-modal-body strong{color:var(--text);}
+  #legal-modal-body p{margin:0 0 8px;}
+  #legal-modal-close{
+    position:absolute;top:14px;right:14px;width:26px;height:26px;border-radius:8px;border:1px solid var(--glass-border);
+    background:rgba(255,255,255,.04);color:var(--text-muted);font-size:12px;cursor:pointer;
+  }
+  #legal-modal-close:hover{color:var(--coral);border-color:var(--coral);}
+
+  /* ---------- Hex tooltip ---------- */
+  #hex-tooltip{
+    position:absolute;z-index:15;transform:translate(-50%,-100%);pointer-events:none;
+    min-width:210px;background:var(--glass);border:1px solid var(--glass-border);border-radius:11px;
+    padding:10px 11px;backdrop-filter:blur(14px);font-size:11.5px;opacity:0;transition:opacity .12s ease;
+    box-shadow:0 0 0 1px rgba(0,240,255,.3), 0 12px 26px rgba(0,0,0,.4);
+  }
+  #hex-tooltip.visible{opacity:1;pointer-events:auto;}
+  .tt-row{display:flex;justify-content:space-between;gap:14px;padding:1.5px 0;}
+  .tt-row .k{color:var(--text-faint);}
+  .tt-row .v{font-weight:600;font-family:var(--font-mono);}
+  .tt-domain{color:var(--text);font-family:var(--font-body) !important;}
+  .tt-cost{color:var(--green);}
+  .tt-paid{color:var(--text-muted);}
+  #tt-cta{
+    margin-top:7px;width:100%;border:none;border-radius:8px;padding:7px 10px;
+    font-family:var(--font-display);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+  }
+  #tt-cta.attack{background:var(--coral);color:#1A0208;}
+  #tt-cta.claim{background:var(--cyan);color:#03181A;}
+  #tt-cta:hover{filter:brightness(1.08);}
+
+  @media (prefers-reduced-motion:reduce){
+    .hud-ticker-track{animation:none;}
+    .hud-dot{animation:none;}
+    #conquer-btn.ready{animation:none;}
+  }
+
+  @media (max-width:960px){
+    body{overflow-y:auto;}
+    .dashboard{padding-top:66px;}
+  }
+</style>
+
+<div id="scene-root">
+  <div id="loading-veil">Initializing war room…</div>
+</div>
+<div id="pan-hint">Drag to pan · scroll to zoom · click a hex</div>
+<div id="hex-tooltip"></div>
+
+<header class="hud">
+  <div class="hud-brand">HEX WARS<span class="colon">:</span> LIVE AD TAKEOVER</div>
+  <div class="hud-divider"></div>
+  <div class="hud-metric"><span class="label">Total War Revenue</span><span class="value tabular" id="hud-revenue">$0.00</span></div>
+  <div class="hud-conflicts"><span class="hud-dot"></span><span id="hud-conflicts">0 ACTIVE CONFLICTS</span></div>
+
+  <div class="hud-ticker"><div class="hud-ticker-track" id="ticker-track"></div></div>
+
+  <div class="hud-right">
+    <div class="hud-timer"><span class="label">War Ends In</span><span class="value tabular" id="hud-countdown">—</span></div>
+    <button class="hud-btn" id="btn-horn" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path id="horn-wave" d="M19 9a5 5 0 0 1 0 6"/></svg>
+      Horn of Battle
+    </button>
+    <button class="hud-btn" id="btn-hof" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a1 1 0 0 0-1 1 4 4 0 0 0 4 4M17 5h3a1 1 0 0 1 1 1 4 4 0 0 1-4 4"/></svg>
+      Hall of Fame
+    </button>
+    <button class="hud-btn" id="btn-feed" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.4" fill="currentColor" stroke="none"/></svg>
+      Global Feed
+    </button>
+  </div>
+</header>
+
+<div id="global-feed">
+  <h3>Global Feed</h3>
+  <div id="global-feed-list"></div>
+</div>
+
+<main class="dashboard">
+  <section class="panel" id="panel-hof">
+    <h2>Hall of Fame (All-Time)</h2>
+    <div class="panel-body">
+      <table id="hof-table">
+        <thead><tr><th>Rank</th><th>Empire</th><th>Peak Val.</th><th>Control</th><th>Revenue</th></tr></thead>
+        <tbody id="hof-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel glow-green" id="panel-conquer">
+    <h2>Buy &amp; Conquer Hex</h2>
+    <div class="panel-body">
+      <form id="conquer-form">
+        <div id="conquer-scroll">
+          <input type="text" id="domain-input" placeholder="Target Website URL (e.g. https://mycompany.com)" autocomplete="off" spellcheck="false">
+
+          <select id="bulk-select">
+            <option value="0">Single hex</option>
+            <option value="1">7-hex cluster (−10%)</option>
+            <option value="2">19-hex cluster (−10%)</option>
+          </select>
+
+          <label class="check-row">
+            <input type="checkbox" id="protect-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;color:var(--cyan);flex:none;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+            Protect for 10 min (+$15.00) — blocks takeover attempts while active
+          </label>
+
+          <div id="player-badge" style="display:none;"><span class="swatch"></span>Empire: <b id="player-name"></b></div>
+          <div class="target-row" id="target-row"><span class="label" id="target-label">Select a hex on the map</span><span class="cost tabular" id="target-cost">—</span></div>
+
+          <label class="check-row consent-row">
+            <input type="checkbox" id="consent-check" required>
+            <span>By clicking Pay, you agree to our <a href="#" id="link-terms">Terms of Service</a> and No-Refund
+              Policy. You request instant delivery of your digital hex placement and acknowledge waiving your
+              right of withdrawal once processing begins. Payments secured by Paddle. See our
+              <a href="#" id="link-privacy">Privacy Policy</a>.</span>
+          </label>
+
+          <div id="conquer-error"></div>
+        </div>
+        <button type="submit" id="conquer-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 17.5 3-3M3 21l7.5-1.5L19 11 13 5l-8.5 8.5L3 21ZM13 5l3-3 5 5-3 3"/></svg>
+          <span id="conquer-btn-label">Conquer Hex Now</span>
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <div id="legal-modal">
+    <div id="legal-modal-card">
+      <button type="button" id="legal-modal-close" aria-label="Close">✕</button>
+      <h3 id="legal-modal-title"></h3>
+      <div id="legal-modal-body"></div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>How the Takeover Works</h2>
+    <div class="panel-body">
+      <div class="steps">
+        <div class="step"><div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 9 6 6M9 15 15 9"/><circle cx="12" cy="12" r="9"/></svg></div><span>Select Hex</span></div>
+        <div class="step-arrow"></div>
+        <div class="step"><div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></svg></div><span>Pay Valuation</span></div>
+        <div class="step-arrow"></div>
+        <div class="step"><div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></div><span>Expand Territory</span></div>
+        <div class="step-arrow"></div>
+        <div class="step"><div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5c0 2 1 3 1 5a4 4 0 0 0 8 0c0-2 1-3 1-5a5 5 0 0 0-5-5Z"/><path d="M9 21h6M10 18h4"/></svg></div><span>Swallow Rivals</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel glow-cyan">
+    <h2>Live Market Data &amp; Analytics</h2>
+    <div class="panel-body">
+      <div id="market-rows">
+        <div class="market-row"><span class="label">Global Market Cap</span><span class="value tabular" id="mkt-cap">—</span></div>
+        <div class="market-row"><span class="label">Total Takeover Events</span><span class="value tabular" id="mkt-events">—</span></div>
+        <div class="market-row"><span class="label">Avg Revenue / Takeover</span><span class="value tabular" id="mkt-avg">—</span></div>
+        <div class="market-row"><span class="label">Avg Control Duration</span><span class="value tabular" id="mkt-duration">—</span></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  /* ============================================================
+     Hex math — flat-top axial grid, ported 1:1 from the real
+     lib/hex/hexMath.ts so this prototype matches the production plan.
+  ============================================================ */
+  var SQRT3 = Math.sqrt(3);
+  var HEX_SIZE = 1;
+  var HEX_DIRS = [{q:1,r:0},{q:1,r:-1},{q:0,r:-1},{q:-1,r:0},{q:-1,r:1},{q:0,r:1}];
+
+  function axialToPixel(hex, size){
+    return { x: size*1.5*hex.q, z: size*(SQRT3*0.5*hex.q + SQRT3*hex.r) };
+  }
+  function hexKey(hex){ return hex.q + ',' + hex.r; }
+  function hexNeighbors(hex){ return HEX_DIRS.map(function(d){ return {q:hex.q+d.q, r:hex.r+d.r}; }); }
+
+  // Civilization-style territorial rule: a hex is only targetable if it borders territory the
+  // acquiring empire already controls, or sits in genuinely unclaimed ground with no owner
+  // touching any of its six neighbors. A hex buried inside a rival's contiguous territory can't
+  // be sniped directly — you have to fight to its border first, one adjacent hex at a time.
+  var ELIGIBILITY_MESSAGES = {
+    expansion: 'Adjacent to your territory',
+    frontier: 'Unclaimed frontier — open to a new capital',
+    blocked: 'Not reachable — attack from a bordering hex first'
+  };
+  function checkHexEligibility(coord, getOwnerAt, acquiringEmpireId){
+    var neighborOwners = hexNeighbors(coord).map(getOwnerAt).filter(function(id){ return !!id; });
+    if (acquiringEmpireId && neighborOwners.indexOf(acquiringEmpireId) !== -1){
+      return { eligible:true, reason:'expansion' };
+    }
+    if (neighborOwners.length === 0){
+      return { eligible:true, reason:'frontier' };
+    }
+    return { eligible:false, reason:'blocked' };
+  }
+  function hexDistanceCube(a,b){
+    var ax=a.q, az=a.r, ay=-ax-az, bx=b.q, bz=b.r, by=-bx-bz;
+    return Math.max(Math.abs(ax-bx), Math.abs(ay-by), Math.abs(az-bz));
+  }
+  function generateHexagonGrid(radius){
+    var hexes = [];
+    for (var q=-radius; q<=radius; q++){
+      var rMin = Math.max(-radius, -q-radius), rMax = Math.min(radius, -q+radius);
+      for (var r=rMin; r<=rMax; r++) hexes.push({q:q, r:r});
+    }
+    return hexes;
+  }
+  function floodFillCluster(origin, isSameOwner){
+    var visited = {}; visited[hexKey(origin)] = true;
+    var cluster = [origin], queue = [origin];
+    while (queue.length){
+      var cur = queue.shift();
+      hexNeighbors(cur).forEach(function(n){
+        var k = hexKey(n);
+        if (visited[k] || !isSameOwner(n)) return;
+        visited[k] = true; cluster.push(n); queue.push(n);
+      });
+    }
+    return cluster;
+  }
+
+  var MAP_RADIUS = 6;
+  var ALL_COORDS = generateHexagonGrid(MAP_RADIUS);
+
+  /* ============================================================
+     Pricing — mirrors lib/pricing/takeoverPricing.ts
+  ============================================================ */
+  var BASE_HEX_PRICE_CENTS = 1000;
+  var TAKEOVER_MULTIPLIER = 1.5;
+  function requiredPriceForHex(hex){
+    return hex.ownerId === null ? BASE_HEX_PRICE_CENTS : Math.round(hex.lastPriceCents * TAKEOVER_MULTIPLIER);
+  }
+  function formatCents(cents){
+    return (cents/100).toLocaleString('en-US', {style:'currency', currency:'USD', minimumFractionDigits:2});
+  }
+
+  // "Protect Hex" upsell — mirrors lib/pricing/takeoverPricing.ts. Blocks takeover *execution*
+  // only; the price shown once it unlocks is still the real 1.5x-of-last-paid formula, never a
+  // fabricated "rising while locked" number with no real bids behind it.
+  var PROTECTION_FEE_CENTS = 1500;
+  var PROTECTION_DURATION_MS = 10*60*1000;
+  function isHexLocked(hex, now){
+    return !!hex.lockedUntil && hex.lockedUntil > (now || Date.now());
+  }
+
+  // "Mass Conquer" bulk discount — 7/19-hex clusters are exactly generateHexagonGrid's radius-1/2
+  // ring sizes re-centered on the chosen origin, not arbitrary counts.
+  var BULK_DISCOUNT_RATE = 0.1;
+  function hexesInRadius(origin, radius){
+    return generateHexagonGrid(radius).map(function(o){ return {q:origin.q+o.q, r:origin.r+o.r}; });
+  }
+  function priceForBulkCluster(hexes){
+    var subtotal = hexes.reduce(function(sum,h){ return sum + requiredPriceForHex(h); }, 0);
+    return Math.round(subtotal * (1-BULK_DISCOUNT_RATE));
+  }
+  // URL-only input, per spec: the acquisition form takes a target website URL, not a bare domain.
+  // Mirrors lib/validation/targetUrlSchema.ts's approach (auto-prepend https://, then validate).
+  function parseTargetUrl(value){
+    var trimmed = (value || '').trim();
+    if (!trimmed) return { ok:false, error:'Enter a website URL' };
+    var withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'https://' + trimmed;
+    try {
+      var parsed = new URL(withScheme);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('bad scheme');
+      if (['localhost','127.0.0.1','0.0.0.0'].indexOf(parsed.hostname) !== -1) {
+        return { ok:false, error:'That host is not eligible' };
+      }
+      return { ok:true, url:parsed.href, hostname:parsed.hostname };
+    } catch (e) {
+      return { ok:false, error:'Enter a valid URL, e.g. https://mycompany.com' };
+    }
+  }
+
+  /* ============================================================
+     Game state
+  ============================================================ */
+  var state = {
+    hexes: {},                 // key -> {coord, ownerId, lastPriceCents, isContested}
+    empires: {},                // id -> {id,name,color,peakValuationCents,totalSpentCents,foundedAt,eliminated,conflictUntil}
+    player: null,               // set on first successful conquest
+    selectedKey: null,
+    hoveredKey: null,
+    totalWarRevenueCents: 1842000,
+    totalTakeoverEvents: 182,
+    globalMarketCapBaseCents: 16000000,
+    avgControlDurationSeconds: 3915,
+    baselineConflicts: 14,
+    warEndsAt: Date.now() + (6*24*60*60 + 14*60*60 + 22*60 + 10) * 1000,
+    tickerEvents: [],
+    bulkRadius: 0,     // 0 = single hex, 1 = 7-hex cluster, 2 = 19-hex cluster
+    protect: false
+  };
+
+  function seedEmpire(id, name, domain, color, coords, peakValuationCents, controlLabel, revenueCents){
+    state.empires[id] = {
+      id: id, name: name, domain: domain, url: 'https://' + domain, color: color,
+      peakValuationCents: peakValuationCents, controlLabel: controlLabel,
+      totalSpentCents: revenueCents, foundedAt: Date.now() - 4200000,
+      eliminated: false, conflictUntil: 0,
+      // Stable per-empire sample figure — never randomized per render, and always rendered with
+      // a "(sample)" label (see showTooltip) so it's never mistaken for a real live count.
+      sampleLiveViewers: 300 + Math.floor(Math.abs(Math.sin(id.length * 91 + name.length)) * 4000)
+    };
+    coords.forEach(function(c, i){
+      state.hexes[hexKey(c)] = { coord:c, ownerId:id, lastPriceCents: 1000 + i*400, isCapital: i===0, lockedUntil:null };
+    });
+  }
+
+  ALL_COORDS.forEach(function(c){ state.hexes[hexKey(c)] = { coord:c, ownerId:null, lastPriceCents:0, isCapital:false, lockedUntil:null }; });
+
+  seedEmpire('lattice','LATTICE','lattice.dev','#FBBF24', [{q:-2,r:4},{q:-1,r:3},{q:-1,r:4},{q:0,r:3}], 1245000, '1h 15m', 1842000);
+  seedEmpire('orbitcache','ORBITCACHE','orbitcache.io','#38BDF8', [{q:-4,r:-1},{q:-3,r:-1},{q:-4,r:0}], 550000, '1h 05m', 120000);
+  seedEmpire('pixeldeck','PIXELDECK','pixeldeck.app','#F472B6', [{q:3,r:-4},{q:4,r:-4}], 520000, '55m', 350000);
+  seedEmpire('voltgrid','VOLTGRID','voltgrid.co','#FB923C', [{q:5,r:1}], 630000, '3h 45m', 830000);
+
+  function pushTicker(html){
+    state.tickerEvents.unshift({ html: html, at: Date.now() });
+    state.tickerEvents = state.tickerEvents.slice(0, 40);
+    renderTicker();
+    renderGlobalFeed();
+  }
+
+  function empireHexes(id){
+    return Object.keys(state.hexes).map(function(k){return state.hexes[k];}).filter(function(h){return h.ownerId===id;});
+  }
+  function empireValuationCents(id){
+    return empireHexes(id).reduce(function(sum,h){return sum+h.lastPriceCents;}, 0);
+  }
+
+  /* ============================================================
+     Three.js scene
+  ============================================================ */
+  var root = document.getElementById('scene-root');
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0B0E14);
+  scene.fog = new THREE.Fog(0x0B0E14, 26, 62);
+
+  var viewSize = 15;
+  var aspect = window.innerWidth / window.innerHeight;
+  var camera = new THREE.OrthographicCamera(-viewSize*aspect, viewSize*aspect, viewSize, -viewSize, 0.1, 200);
+  var ISO_TILT = Math.atan(1/Math.sqrt(2));
+  var ISO_DIST = 30;
+  var camPos = new THREE.Vector3(
+    ISO_DIST*Math.cos(ISO_TILT)*Math.SQRT1_2,
+    ISO_DIST*Math.sin(ISO_TILT),
+    ISO_DIST*Math.cos(ISO_TILT)*Math.SQRT1_2
+  );
+  camera.position.copy(camPos);
+  camera.lookAt(0,0,0);
+  camera.zoom = 1;
+  camera.updateProjectionMatrix();
+
+  // Fixed camera orientation -> precompute ground-plane right/forward once for drag panning.
+  var camForward = new THREE.Vector3(); camera.getWorldDirection(camForward); camForward.y = 0; camForward.normalize();
+  var camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0,1,0)).normalize();
+
+  var renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  root.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  var sun = new THREE.DirectionalLight(0xffffff, 1.15);
+  sun.position.set(14, 24, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  scene.add(sun);
+
+  var worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+
+  var FLAT_TOP_ROTATION = Math.PI/6;
+  var PRISM_HEIGHT = 0.3;
+
+  // --- Empty hex field: one InstancedMesh, one draw call ---
+  var emptyCoords = ALL_COORDS.filter(function(c){ return state.hexes[hexKey(c)].ownerId === null; });
+  var emptyGeometry = new THREE.CylinderGeometry(HEX_SIZE*0.96, HEX_SIZE*0.96, PRISM_HEIGHT, 6);
+  var emptyMaterial = new THREE.MeshStandardMaterial({ color:0x1E2638, metalness:0.4, roughness:0.65, emissive:0x2A364F, emissiveIntensity:0.15 });
+  var emptyMesh = new THREE.InstancedMesh(emptyGeometry, emptyMaterial, emptyCoords.length);
+  emptyMesh.receiveShadow = true;
+  var dummy = new THREE.Object3D();
+  emptyCoords.forEach(function(c, i){
+    var p = axialToPixel(c, HEX_SIZE);
+    dummy.position.set(p.x, 0, p.z);
+    dummy.rotation.set(0, FLAT_TOP_ROTATION, 0);
+    dummy.updateMatrix();
+    emptyMesh.setMatrixAt(i, dummy.matrix);
+  });
+  emptyMesh.instanceMatrix.needsUpdate = true;
+  worldGroup.add(emptyMesh);
+
+  // Per-instance hover elevation, lerped each frame (mirrors useHexInteraction.ts's approach).
+  var emptyElevations = new Float32Array(emptyCoords.length);
+  var hoveredEmptyIndex = -1;
+  function writeEmptyInstance(i, y){
+    var p = axialToPixel(emptyCoords[i], HEX_SIZE);
+    dummy.position.set(p.x, y, p.z);
+    dummy.rotation.set(0, FLAT_TOP_ROTATION, 0);
+    dummy.updateMatrix();
+    emptyMesh.setMatrixAt(i, dummy.matrix);
+    emptyMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // --- Brand tiles: individual prism per owned hex + one merged plaque per cluster ---
+  var brandGroup = new THREE.Group();
+  worldGroup.add(brandGroup);
+  var brandPrismGeometry = new THREE.CylinderGeometry(HEX_SIZE*0.96, HEX_SIZE*0.96, PRISM_HEIGHT, 6);
+  var brandMeshesByKey = {};   // hexKey -> mesh
+  var plaquesByOwner = {};     // ownerId -> [mesh,...] (usually one, but supports split territory)
+
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  function makePlaqueTexture(label, colorHex){
+    var canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 512;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,512,512);
+    ctx.save();
+    ctx.translate(256,256);
+    var grad = ctx.createRadialGradient(0,0,50,0,0,220);
+    grad.addColorStop(0, colorHex + 'AA');
+    grad.addColorStop(1, colorHex + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0,0,220,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(11,14,20,0.88)';
+    roundRect(ctx,-195,-66,390,132,22); ctx.fill();
+    ctx.strokeStyle = colorHex; ctx.lineWidth = 4;
+    roundRect(ctx,-195,-66,390,132,22); ctx.stroke();
+    ctx.fillStyle = '#EDF1F7';
+    var fontSize = label.length > 9 ? 46 : 58;
+    ctx.font = '700 ' + fontSize + 'px "Space Grotesk", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label.toUpperCase(), 0, 6);
+    ctx.restore();
+    var tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  function ownedIsSameOwner(ownerId){
+    return function(coord){
+      var h = state.hexes[hexKey(coord)];
+      return !!h && h.ownerId === ownerId;
+    };
+  }
+
+  function clustersForOwner(ownerId){
+    var hexesOwned = empireHexes(ownerId);
+    var visited = {}, clusters = [];
+    hexesOwned.forEach(function(h){
+      var k = hexKey(h.coord);
+      if (visited[k]) return;
+      var coordCluster = floodFillCluster(h.coord, ownedIsSameOwner(ownerId));
+      coordCluster.forEach(function(c){ visited[hexKey(c)] = true; });
+      clusters.push(coordCluster);
+    });
+    return clusters;
+  }
+
+  function addBrandPrism(coord, ownerId){
+    var key = hexKey(coord);
+    var p = axialToPixel(coord, HEX_SIZE);
+    var empire = state.empires[ownerId];
+    var mesh = new THREE.Mesh(brandPrismGeometry, new THREE.MeshStandardMaterial({
+      color: 0x0F1420, metalness:0.7, roughness:0.25,
+      emissive: new THREE.Color(empire.color), emissiveIntensity: 0.35
+    }));
+    mesh.position.set(p.x, 0, p.z);
+    mesh.rotation.set(0, FLAT_TOP_ROTATION, 0);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData.hexKey = key;
+    brandGroup.add(mesh);
+    brandMeshesByKey[key] = mesh;
+    return mesh;
+  }
+
+  function rebuildPlaquesForOwner(ownerId){
+    (plaquesByOwner[ownerId] || []).forEach(function(m){ brandGroup.remove(m); m.material.map && m.material.map.dispose(); m.material.dispose(); });
+    var empire = state.empires[ownerId];
+    var clusters = clustersForOwner(ownerId);
+    plaquesByOwner[ownerId] = clusters.map(function(cluster){
+      var sum = {x:0,z:0};
+      var maxDist = 0;
+      cluster.forEach(function(c){
+        var p = axialToPixel(c, HEX_SIZE);
+        sum.x += p.x; sum.z += p.z;
+        maxDist = Math.max(maxDist, hexDistanceCube(cluster[0], c));
+      });
+      var centroid = { x: sum.x/cluster.length, z: sum.z/cluster.length };
+      var footprint = (maxDist+1) * HEX_SIZE;
+      var tex = makePlaqueTexture(empire.name, empire.color);
+      var mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(footprint*1.25, footprint*1.25),
+        new THREE.MeshBasicMaterial({ map:tex, transparent:true })
+      );
+      mesh.rotation.set(-Math.PI/2, 0, 0);
+      mesh.position.set(centroid.x, PRISM_HEIGHT/2 + 0.01, centroid.z);
+      mesh.raycast = function(){};
+      mesh.scale.setScalar(0.001);
+      brandGroup.add(mesh);
+      animateSpringIn(mesh);
+      return mesh;
+    });
+  }
+
+  Object.keys(state.empires).forEach(function(id){
+    empireHexes(id).forEach(function(h){ addBrandPrism(h.coord, id); });
+    rebuildPlaquesForOwner(id);
+  });
+
+  // --- Hover / selection ring overlays ---
+  function makeRing(color, opacity, innerMul, outerMul){
+    var mesh = new THREE.Mesh(
+      new THREE.RingGeometry(HEX_SIZE*innerMul, HEX_SIZE*outerMul, 6),
+      new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:opacity, side:THREE.DoubleSide, blending:THREE.AdditiveBlending })
+    );
+    mesh.rotation.set(-Math.PI/2, 0, FLAT_TOP_ROTATION);
+    mesh.visible = false;
+    mesh.raycast = function(){};
+    worldGroup.add(mesh);
+    return mesh;
+  }
+  var hoverRing = makeRing(0x00F0FF, 0.9, 0.82, 1.0);
+  // Selected hex gets its own larger, pulsing neon outline (a "target lock" ring) distinct from hover.
+  var selectRing = makeRing(0x00F0FF, 0.6, 0.98, 1.22);
+
+  /* ============================================================
+     Transient animation registry (ring bursts, particles, spring-ins)
+  ============================================================ */
+  var animations = [];
+  function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+  function easeOutBack(t){ var c1=1.70158, c3=c1+1; return 1 + c3*Math.pow(t-1,3) + c1*Math.pow(t-1,2); }
+
+  function animateSpringIn(mesh){
+    var start = performance.now();
+    animations.push({ update: function(now){
+      var t = Math.min((now-start)/520, 1);
+      mesh.scale.setScalar(Math.max(0.001, easeOutBack(t)));
+      return t < 1;
+    }});
+  }
+
+  function animateShatterOut(mesh){
+    var start = performance.now();
+    var startScale = mesh.scale.x;
+    animations.push({ update: function(now){
+      var t = Math.min((now-start)/340, 1);
+      mesh.scale.setScalar(startScale * (1-t));
+      mesh.rotation.z += 0.35;
+      mesh.material.opacity = (1-t);
+      if (t >= 1){ brandGroup.remove(mesh); mesh.material.map && mesh.material.map.dispose(); mesh.material.dispose(); }
+      return t < 1;
+    }});
+  }
+
+  function spawnShockwave(worldX, worldZ, color){
+    var mesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.15, 0.42, 40),
+      new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:0.95, side:THREE.DoubleSide, blending:THREE.AdditiveBlending })
+    );
+    mesh.rotation.set(-Math.PI/2,0,0);
+    mesh.position.set(worldX, 0.22, worldZ);
+    mesh.raycast = function(){};
+    worldGroup.add(mesh);
+    var start = performance.now();
+    animations.push({ update:function(now){
+      var t = Math.min((now-start)/700, 1);
+      var scale = 0.6 + easeOutCubic(t)*4.5;
+      mesh.scale.set(scale, scale, scale);
+      mesh.material.opacity = 0.95*(1-t);
+      if (t>=1){ worldGroup.remove(mesh); mesh.material.dispose(); mesh.geometry.dispose(); }
+      return t < 1;
+    }});
+  }
+
+  function spawnParticleBurst(worldX, worldZ, color){
+    var count = 26;
+    var positions = new Float32Array(count*3);
+    var velocities = [];
+    for (var i=0;i<count;i++){
+      positions[i*3]=worldX; positions[i*3+1]=0.3; positions[i*3+2]=worldZ;
+      var angle = Math.random()*Math.PI*2;
+      var speed = 1.6 + Math.random()*2.2;
+      velocities.push(new THREE.Vector3(Math.cos(angle)*speed, 2.4+Math.random()*2, Math.sin(angle)*speed));
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    var mat = new THREE.PointsMaterial({ color:color, size:0.16, transparent:true, opacity:1, blending:THREE.AdditiveBlending, depthWrite:false });
+    var points = new THREE.Points(geo, mat);
+    points.raycast = function(){};
+    worldGroup.add(points);
+    var start = performance.now(), last = start;
+    animations.push({ update:function(now){
+      var dt = Math.min((now-last)/1000, 0.05); last = now;
+      var t = Math.min((now-start)/900, 1);
+      var pos = geo.attributes.position.array;
+      for (var i=0;i<count;i++){
+        velocities[i].y -= 9*dt;
+        pos[i*3]   += velocities[i].x*dt;
+        pos[i*3+1] += velocities[i].y*dt;
+        pos[i*3+2] += velocities[i].z*dt;
+      }
+      geo.attributes.position.needsUpdate = true;
+      mat.opacity = 1-t;
+      if (t>=1){ worldGroup.remove(points); geo.dispose(); mat.dispose(); }
+      return t < 1;
+    }});
+  }
+
+  /* ============================================================
+     Raycasting: hover + click
+  ============================================================ */
+  var raycaster = new THREE.Raycaster();
+  var pointerNDC = new THREE.Vector2();
+  var canvas = renderer.domElement;
+
+  function updatePointerNDC(evt){
+    var rect = canvas.getBoundingClientRect();
+    pointerNDC.x = ((evt.clientX-rect.left)/rect.width)*2-1;
+    pointerNDC.y = -((evt.clientY-rect.top)/rect.height)*2+1;
+  }
+
+  function pickHexAtPointer(){
+    raycaster.setFromCamera(pointerNDC, camera);
+    var brandHits = raycaster.intersectObjects(brandGroup.children.filter(function(m){return m.userData && m.userData.hexKey;}));
+    if (brandHits.length) return brandHits[0].object.userData.hexKey;
+    var emptyHits = raycaster.intersectObject(emptyMesh);
+    if (emptyHits.length && emptyHits[0].instanceId !== undefined){
+      var idx = emptyHits[0].instanceId;
+      // Conquered instances are parked far below the map rather than removed (InstancedMesh
+      // has a fixed instance count) — skip them so a stray ray can't "click through" to a ghost.
+      if (emptyElevations[idx] <= -40) return null;
+      return hexKey(emptyCoords[idx]);
+    }
+    return null;
+  }
+
+  function setHover(key){
+    if (key === state.hoveredKey) return;
+    state.hoveredKey = key;
+    var hex = key ? state.hexes[key] : null;
+    if (!hex){ hoverRing.visible = false; hideTooltip(); return; }
+    var p = axialToPixel(hex.coord, HEX_SIZE);
+    hoverRing.position.set(p.x, PRISM_HEIGHT/2+0.02, p.z);
+    hoverRing.visible = true;
+
+    // Visual "can I go here?" cue the instant you hover, before even reading the card — matches
+    // the map-click-driven discovery the adjacency rule is meant to teach.
+    var isOwn = hex.ownerId === 'player';
+    var acquiringEmpireId = state.player ? state.player.id : null;
+    var eligibility = checkHexEligibility(hex.coord, getOwnerAtCoord, acquiringEmpireId);
+    hoverRing.material.color.set(isOwn || eligibility.eligible ? 0x00F0FF : 0xFF3366);
+
+    showTooltip(hex);
+  }
+
+  function setSelected(key){
+    state.selectedKey = key;
+    var hex = key ? state.hexes[key] : null;
+    if (!hex){ selectRing.visible = false; }
+    else {
+      var p = axialToPixel(hex.coord, HEX_SIZE);
+      selectRing.position.set(p.x, PRISM_HEIGHT/2+0.03, p.z);
+      selectRing.visible = true;
+      playTone('select');
+    }
+    renderConquerPanel();
+  }
+
+  /* ============================================================
+     Pan + zoom (drag with momentum, wheel zoom)
+  ============================================================ */
+  var isPointerDown = false, isDragging = false;
+  var lastX=0, lastY=0, velX=0, velY=0;
+  var DRAG_THRESHOLD = 4;
+  var panDownX=0, panDownY=0;
+
+  canvas.addEventListener('pointerdown', function(e){
+    isPointerDown = true; isDragging = false;
+    lastX = e.clientX; lastY = e.clientY; panDownX = e.clientX; panDownY = e.clientY;
+    velX = 0; velY = 0;
+    canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', function(e){
+    if (isPointerDown){
+      var dx = e.clientX-lastX, dy = e.clientY-lastY;
+      if (!isDragging && (Math.abs(e.clientX-panDownX) > DRAG_THRESHOLD || Math.abs(e.clientY-panDownY) > DRAG_THRESHOLD)){
+        isDragging = true; canvas.classList.add('dragging'); hideTooltip();
+      }
+      if (isDragging){
+        var panSpeed = 0.045 / camera.zoom;
+        worldGroup.position.addScaledVector(camRight, dx*panSpeed);
+        worldGroup.position.addScaledVector(camForward, -dy*panSpeed);
+        velX = dx; velY = dy;
+      }
+      lastX = e.clientX; lastY = e.clientY;
+    } else {
+      updatePointerNDC(e);
+      var key = pickHexAtPointer();
+      setHover(key);
+      if (key) positionTooltipScreen(state.hexes[key]);
+    }
+  });
+
+  function endDrag(e){
+    if (!isPointerDown) return;
+    isPointerDown = false;
+    canvas.classList.remove('dragging');
+    if (isDragging){
+      var panSpeed = 0.045/camera.zoom;
+      momentum.x = velX*panSpeed*2.2; momentum.z = -velY*panSpeed*2.2;
+    } else {
+      updatePointerNDC(e);
+      var key = pickHexAtPointer();
+      // Dual-interaction model: a plain click on an OCCUPIED hex visits the owner's real site —
+      // attacking it is a deliberate act via the hover card's CONQUER button, never a click side
+      // effect. Empty hexes have nowhere to visit, so a plain click just selects them as before.
+      var clickedHex = key ? state.hexes[key] : null;
+      if (clickedHex && clickedHex.ownerId && clickedHex.ownerId !== 'player'){
+        var owner = state.empires[clickedHex.ownerId];
+        var win = window.open(owner.url, '_blank', 'noopener,noreferrer');
+        if (!win) {
+          // Sandboxed preview environments sometimes block script-initiated window.open —
+          // the tooltip's "Visit" link (a real <a> tag) is the reliable fallback for that case.
+          setSelected(key);
+        }
+        return;
+      }
+      setSelected(key);
+    }
+    isDragging = false;
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointerleave', function(e){
+    // The tooltip is a DOM overlay that visually sits on top of the canvas — moving the pointer
+    // onto it (e.g. to click its CTA) fires this same event with relatedTarget = the tooltip.
+    // Only clear hover when the pointer has actually left the scene, not when it's landed on the tooltip.
+    if (isPointerDown) return;
+    if (e.relatedTarget && (e.relatedTarget === tooltipEl || tooltipEl.contains(e.relatedTarget))) return;
+    setHover(null);
+  });
+
+  var momentum = {x:0, z:0};
+
+  canvas.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var factor = e.deltaY > 0 ? 0.9 : 1.1;
+    camera.zoom = Math.min(3.2, Math.max(0.55, camera.zoom*factor));
+    camera.updateProjectionMatrix();
+  }, { passive:false });
+
+  window.addEventListener('resize', function(){
+    var a = window.innerWidth/window.innerHeight;
+    camera.left = -viewSize*a; camera.right = viewSize*a;
+    camera.top = viewSize; camera.bottom = -viewSize;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  var hintDismissed = false;
+  canvas.addEventListener('pointerdown', function(){
+    if (hintDismissed) return;
+    hintDismissed = true;
+    document.getElementById('pan-hint').classList.add('hidden');
+  });
+
+  /* ============================================================
+     Tooltip (DOM overlay, positioned via camera projection)
+  ============================================================ */
+  var tooltipEl = document.getElementById('hex-tooltip');
+  // Moving the pointer off the tooltip onto the canvas is a normal hand-off (canvas's own
+  // pointermove immediately re-establishes hover) — only clear hover when it leaves to anywhere else.
+  tooltipEl.addEventListener('pointerleave', function(e){
+    if (e.relatedTarget !== canvas) setHover(null);
+  });
+
+  function getOwnerAtCoord(coord){
+    var h = state.hexes[hexKey(coord)];
+    return h ? h.ownerId : null;
+  }
+
+  function formatLockRemaining(hex){
+    var ms = Math.max(0, hex.lockedUntil - Date.now());
+    var s = Math.ceil(ms/1000);
+    return Math.floor(s/60)+':'+(s%60<10?'0':'')+(s%60);
+  }
+
+  function showTooltip(hex){
+    var isOwn = hex.ownerId === 'player';
+    var empire = hex.ownerId ? state.empires[hex.ownerId] : null;
+    var cost = requiredPriceForHex(hex);
+    var acquiringEmpireId = state.player ? state.player.id : null;
+    var eligibility = checkHexEligibility(hex.coord, getOwnerAtCoord, acquiringEmpireId);
+    var isLocked = !isOwn && isHexLocked(hex);
+    var isBlocked = !isOwn && !isLocked && !eligibility.eligible;
+
+    var rows =
+      '<div class="tt-row"><span class="k">Owner</span><span class="v tt-domain">'+(empire ? empire.domain : 'Unclaimed')+'</span></div>' +
+      (empire ? '<div class="tt-row"><span class="k">Purchase price</span><span class="v tt-paid">'+formatCents(hex.lastPriceCents)+'</span></div>' : '') +
+      (isBlocked || isLocked ? '' : '<div class="tt-row"><span class="k">'+(empire ? 'Takeover price' : 'Claim price')+'</span><span class="v tt-cost">'+formatCents(cost)+'</span></div>') +
+      // Explicitly labeled "(sample)" — this prototype has no backend/real traffic to measure,
+      // so this must never read as a genuine live count. See ARCHITECTURE.md §19.
+      (empire ? '<div class="tt-row"><span class="k">Live viewers (sample)</span><span class="v" style="color:var(--green)">'+empire.sampleLiveViewers.toLocaleString()+'</span></div>' : '');
+
+    var cta;
+    if (isOwn){
+      cta = '<div style="margin-top:7px;text-align:center;color:var(--text-faint);font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Your territory</div>';
+    } else if (isLocked){
+      cta = '<div style="margin-top:7px;display:flex;align-items:center;justify-content:center;gap:5px;border:1px solid rgba(0,240,255,.3);background:rgba(0,240,255,.08);border-radius:8px;padding:7px 10px;text-align:center;color:var(--cyan);font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">🛡 Protected '+formatLockRemaining(hex)+'</div>';
+    } else if (isBlocked){
+      cta = '<div style="margin-top:7px;display:flex;align-items:center;justify-content:center;gap:5px;border:1px solid rgba(255,51,102,.3);background:rgba(255,51,102,.1);border-radius:8px;padding:7px 10px;text-align:center;color:var(--coral);font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">🔒 '+ELIGIBILITY_MESSAGES[eligibility.reason]+'</div>';
+    } else {
+      cta = '<button type="button" id="tt-cta" class="'+(empire?'attack':'claim')+'">'+(empire?'⚔ Conquer Now':'Claim Hex')+'</button>';
+    }
+
+    var visitLink = (empire && !isOwn)
+      ? '<a href="'+empire.url+'" target="_blank" rel="noopener noreferrer" style="display:block;margin-top:6px;text-align:center;font-size:10px;color:var(--text-faint);text-decoration:none;">↗ Visit '+empire.domain+'</a>'
+      : '';
+
+    tooltipEl.innerHTML = rows + cta + visitLink;
+    tooltipEl.classList.toggle('visible', true);
+    tooltipEl.style.boxShadow = isBlocked
+      ? '0 0 0 1px rgba(255,51,102,.4), 0 12px 26px rgba(0,0,0,.4)'
+      : '0 0 0 1px rgba(0,240,255,.3), 0 12px 26px rgba(0,0,0,.4)';
+    positionTooltipScreen(hex);
+
+    if (!isOwn && !isBlocked && !isLocked){
+      var key = hexKey(hex.coord);
+      document.getElementById('tt-cta').addEventListener('click', function(){ handleTooltipConquer(key); });
+    }
+  }
+  function hideTooltip(){ tooltipEl.classList.remove('visible'); }
+
+  function handleTooltipConquer(key){
+    setSelected(key);
+    if (!state.player){
+      var input = document.getElementById('domain-input');
+      input.focus();
+      flashConquerPanel();
+      return;
+    }
+    if (!document.getElementById('consent-check').checked){
+      document.getElementById('conquer-error').textContent = 'Check the box below to accept the Terms of Service first';
+      flashConquerPanel();
+      return;
+    }
+    var result = resolveConquest('');
+    if (!result.ok){
+      document.getElementById('conquer-error').textContent = result.error;
+      flashConquerPanel();
+    }
+  }
+  function positionTooltipScreen(hex){
+    var p = axialToPixel(hex.coord, HEX_SIZE);
+    var worldPos = new THREE.Vector3(p.x, 0.7, p.z).add(worldGroup.position);
+    worldPos.project(camera);
+    var x = (worldPos.x*0.5+0.5)*window.innerWidth;
+    var y = (-worldPos.y*0.5+0.5)*window.innerHeight;
+    tooltipEl.style.left = x+'px';
+    tooltipEl.style.top = y+'px';
+  }
+
+  /* ============================================================
+     Procedural SFX (Web Audio API, no external files)
+  ============================================================ */
+  var audioCtx = null, soundEnabled = false;
+  function ensureAudio(){ if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+  function blip(freq, startAt, dur, gain, type){
+    var osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = type||'square'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, startAt);
+    g.gain.exponentialRampToValueAtTime(gain, startAt+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, startAt+dur);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(startAt); osc.stop(startAt+dur+0.02);
+  }
+  function playTone(kind){
+    if (!soundEnabled) return;
+    ensureAudio();
+    var t = audioCtx.currentTime;
+    if (kind === 'select') blip(620, t, 0.06, 0.05, 'square');
+    else if (kind === 'takeover'){
+      blip(440, t, 0.09, 0.06, 'triangle');
+      blip(660, t+0.08, 0.09, 0.06, 'triangle');
+      blip(880, t+0.16, 0.16, 0.07, 'triangle');
+    } else if (kind === 'alarm'){
+      blip(300, t, 0.14, 0.05, 'sawtooth');
+      blip(240, t+0.16, 0.14, 0.05, 'sawtooth');
+    }
+  }
+  document.getElementById('btn-horn').addEventListener('click', function(){
+    soundEnabled = !soundEnabled;
+    if (soundEnabled) ensureAudio();
+    this.classList.toggle('active', soundEnabled);
+    this.setAttribute('aria-pressed', String(soundEnabled));
+  });
+
+  /* ============================================================
+     Conquest resolution
+  ============================================================ */
+  function resolveConquest(urlInput){
+    var originKey = state.selectedKey;
+    if (!originKey) return { ok:false, error:'Select a hex first' };
+    var originHex = state.hexes[originKey];
+
+    // Consent must be checked at the point of actual execution, not just assumed because the
+    // bottom-panel form was used — the hover card's Conquer button is a second entry point into
+    // this same function and must not be able to skip it.
+    if (!document.getElementById('consent-check').checked){
+      return { ok:false, error:'You must accept the Terms of Service and No-Refund Policy to continue' };
+    }
+
+    var radius = state.bulkRadius;
+    var targetCoords = radius > 0 ? hexesInRadius(originHex.coord, radius) : [originHex.coord];
+    var targetKeys = targetCoords.map(hexKey);
+    var targetHexes = targetKeys.map(function(k){ return state.hexes[k]; });
+
+    if (targetHexes.some(function(h){ return !h; })){
+      return { ok:false, error:'Not enough room here for that cluster size — pick a hex further from the map edge' };
+    }
+    if (targetHexes.some(function(h){ return h.ownerId === 'player'; })){
+      return { ok:false, error:'You already control part of this cluster' };
+    }
+
+    // Defense in depth: the UI already hides the Conquer action for a blocked/locked hex, but
+    // this re-checks every hex in the target set independently — the same principle as the real
+    // app's server re-deriving eligibility instead of trusting the client.
+    var acquiringEmpireId = state.player ? state.player.id : null;
+    for (var i=0;i<targetHexes.length;i++){
+      if (isHexLocked(targetHexes[i])) return { ok:false, error:'Hex '+hexKey(targetHexes[i].coord)+' is protected right now' };
+      var elig = checkHexEligibility(targetHexes[i].coord, getOwnerAtCoord, acquiringEmpireId);
+      if (!elig.eligible) return { ok:false, error: ELIGIBILITY_MESSAGES[elig.reason] };
+    }
+
+    if (!state.player){
+      var parsed = parseTargetUrl(urlInput);
+      if (!parsed.ok) return { ok:false, error:parsed.error };
+      state.player = {
+        id:'player', name: parsed.hostname.split('.')[0], domain: parsed.hostname, url: parsed.url,
+        color:'#8A2BE2', peakValuationCents:0, totalSpentCents:0, foundedAt: Date.now(), eliminated:false, conflictUntil:0,
+        sampleLiveViewers: 40 + Math.floor(Math.random() * 200) // freshly "founded" — a small sample number, not a big FOMO figure
+      };
+      state.empires.player = state.player;
+    }
+
+    // Computed against each hex's CURRENT (pre-transfer) price — must happen before the loop
+    // below starts overwriting lastPriceCents.
+    var subtotal = radius > 0 ? priceForBulkCluster(targetHexes) : requiredPriceForHex(originHex);
+    var protectFee = state.protect ? PROTECTION_FEE_CENTS : 0;
+    var totalPrice = subtotal + protectFee;
+    var lockedUntil = state.protect ? Date.now() + PROTECTION_DURATION_MS : null;
+    var perHexPrice = Math.round(subtotal / targetHexes.length); // even split across the bundle for each tile's own ledger
+
+    var affectedDefenderIds = {};
+
+    targetHexes.forEach(function(hex){
+      var defenderId = hex.ownerId;
+      var key = hexKey(hex.coord);
+
+      hex.ownerId = 'player';
+      hex.lastPriceCents = perHexPrice;
+      hex.lockedUntil = lockedUntil;
+      if (brandMeshesByKey[key]){
+        brandGroup.remove(brandMeshesByKey[key]);
+        brandMeshesByKey[key].material.dispose();
+      }
+      addBrandPrism(hex.coord, 'player');
+
+      // The InstancedMesh has a fixed instance count, so a conquered empty hex is parked far
+      // below the map (both its live elevation state and its matrix) rather than removed.
+      var emptyIdx = emptyCoords.findIndex(function(c){ return hexKey(c) === key; });
+      if (emptyIdx >= 0){ emptyElevations[emptyIdx] = -50; writeEmptyInstance(emptyIdx, -50); }
+
+      var p = axialToPixel(hex.coord, HEX_SIZE);
+      if (defenderId){
+        var defender = state.empires[defenderId];
+        spawnShockwave(p.x, p.z, defender.color);
+        spawnParticleBurst(p.x, p.z, defender.color);
+        defender.conflictUntil = Date.now() + 8000;
+        affectedDefenderIds[defenderId] = true;
+      } else {
+        spawnShockwave(p.x, p.z, '#8A2BE2');
+      }
+    });
+
+    state.player.totalSpentCents += totalPrice;
+    state.totalWarRevenueCents += totalPrice;
+    state.totalTakeoverEvents += 1;
+
+    var lockBadge = state.protect ? ' 🛡' : '';
+    var summaryLabel = targetHexes.length > 1 ? (targetHexes.length+'-hex cluster at '+originKey) : ('Hex '+originKey);
+    var defenderNames = Object.keys(affectedDefenderIds).map(function(id){ return state.empires[id].domain; });
+
+    if (defenderNames.length){
+      pushTicker('<b>'+state.player.domain+'</b> took '+summaryLabel+' from <b>'+defenderNames.join(', ')+'</b> for '+formatCents(totalPrice)+lockBadge);
+      flashPanel('panel-hof');
+      playTone('alarm');
+    } else {
+      pushTicker('<b>'+state.player.domain+'</b> claimed '+summaryLabel+' for '+formatCents(totalPrice)+lockBadge);
+    }
+
+    Object.keys(affectedDefenderIds).forEach(function(defenderId){
+      var defender = state.empires[defenderId];
+      if (empireHexes(defenderId).length === 0 && !defender.eliminated){
+        defender.eliminated = true;
+        var lastPos = axialToPixel(originHex.coord, HEX_SIZE);
+        spawnShockwave(lastPos.x, lastPos.z, '#FF3366');
+        pushTicker('☠ <b>'+defender.name+'</b> has been ELIMINATED from the map');
+      }
+    });
+
+    playTone('takeover');
+    Object.keys(state.empires).forEach(rebuildPlaquesForOwner);
+
+    state.player.peakValuationCents = Math.max(state.player.peakValuationCents, empireValuationCents('player'));
+    pulseRevenue();
+    renderAll();
+    return { ok:true };
+  }
+
+  function flashPanel(id){
+    var el = document.getElementById(id);
+    el.classList.remove('flash-attack'); void el.offsetWidth; el.classList.add('flash-attack');
+  }
+  function flashConquerPanel(){ flashPanel('panel-conquer'); }
+
+  /* ============================================================
+     UI rendering
+  ============================================================ */
+  var lastRevenue = state.totalWarRevenueCents;
+  function pulseRevenue(){
+    var el = document.getElementById('hud-revenue');
+    el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
+  }
+
+  function renderHud(){
+    document.getElementById('hud-revenue').textContent = formatCents(state.totalWarRevenueCents);
+    var conflicts = state.baselineConflicts + Object.keys(state.empires).filter(function(id){
+      return state.empires[id].conflictUntil > Date.now();
+    }).length;
+    document.getElementById('hud-conflicts').textContent = conflicts + ' ACTIVE CONFLICTS';
+  }
+
+  function renderCountdown(){
+    var ms = Math.max(0, state.warEndsAt - Date.now());
+    var s = Math.floor(ms/1000);
+    var d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    function pad(n){ return (n<10?'0':'')+n; }
+    document.getElementById('hud-countdown').textContent = d+'D '+pad(h)+'H '+pad(m)+'M '+pad(sec)+'S';
+  }
+
+  function renderTicker(){
+    var seed = [
+      'GitHub-style scout spotted near Hex 3,-2',
+      'ORBITCACHE reinforced Alpha Cluster',
+      'LATTICE market share holding steady',
+      'VOLTGRID down to its last stronghold'
+    ];
+    var items = state.tickerEvents.map(function(e){return e.html;});
+    if (items.length < 4) items = items.concat(seed);
+    var loop = items.concat(items);
+    document.getElementById('ticker-track').innerHTML = loop.map(function(t){return '<span>'+t+'</span>';}).join('');
+  }
+
+  function renderGlobalFeed(){
+    var list = document.getElementById('global-feed-list');
+    if (!state.tickerEvents.length){
+      list.innerHTML = '<div class="row">No conquests yet — attack a hex to make history.</div>';
+      return;
+    }
+    list.innerHTML = state.tickerEvents.map(function(e){
+      var secondsAgo = Math.max(0, Math.round((Date.now()-e.at)/1000));
+      return '<div class="row">'+e.html+' <span style="color:var(--text-faint)">· '+secondsAgo+'s ago</span></div>';
+    }).join('');
+  }
+
+  function formatDuration(seconds){
+    var h = Math.floor(seconds/3600), m = Math.floor((seconds%3600)/60);
+    return h+'h '+m+'m';
+  }
+
+  function renderHallOfFame(){
+    var rows = Object.keys(state.empires).map(function(id){
+      var e = state.empires[id];
+      return {
+        id:id, name:e.name, url:e.url, color:e.color, eliminated:e.eliminated,
+        peak: Math.max(e.peakValuationCents, empireValuationCents(id)),
+        control: id==='player' ? formatDuration(Math.round((Date.now()-e.foundedAt)/1000)) : e.controlLabel,
+        revenue: e.totalSpentCents
+      };
+    }).sort(function(a,b){ return b.peak - a.peak; });
+
+    document.getElementById('hof-body').innerHTML = rows.map(function(r, i){
+      return '<tr class="'+(r.eliminated?'eliminated':'')+'">'+
+        '<td class="hof-rank">#'+(i+1)+'</td>'+
+        '<td><div class="hof-name"><span class="hof-swatch" style="background:'+r.color+'"></span>'+
+          '<a href="'+r.url+'" target="_blank" rel="noopener noreferrer sponsored" style="color:inherit;text-decoration:none">'+r.name.toUpperCase()+'</a>'+
+          (r.eliminated?' ☠':'')+'</div></td>'+
+        '<td>'+formatCents(r.peak)+'</td>'+
+        '<td>'+r.control+'</td>'+
+        '<td class="hof-revenue">'+formatCents(r.revenue)+'</td>'+
+      '</tr>';
+    }).join('');
+  }
+
+  function renderConquerPanel(){
+    var key = state.selectedKey;
+    var originHex = key ? state.hexes[key] : null;
+    var acquiringEmpireId = state.player ? state.player.id : null;
+    var radius = state.bulkRadius;
+
+    var targetCoords = originHex ? (radius > 0 ? hexesInRadius(originHex.coord, radius) : [originHex.coord]) : [];
+    var targetKeys = targetCoords.map(hexKey);
+    var targetHexes = targetKeys.map(function(k){ return state.hexes[k]; });
+    var clusterComplete = originHex && targetHexes.every(function(h){ return !!h; });
+    var alreadyOwned = clusterComplete && targetHexes.some(function(h){ return h.ownerId === 'player'; });
+    var lockedHex = clusterComplete && targetHexes.filter(function(h){ return isHexLocked(h); })[0];
+    var blockedHex = clusterComplete && !lockedHex && targetHexes
+      .map(function(h){ return { h:h, elig: checkHexEligibility(h.coord, getOwnerAtCoord, acquiringEmpireId) }; })
+      .filter(function(x){ return !x.elig.eligible; })[0];
+
+    var reasonText = null;
+    if (originHex && !clusterComplete) reasonText = 'Not enough room here — pick a hex further from the map edge';
+    else if (alreadyOwned) reasonText = 'You already control part of this cluster';
+    else if (lockedHex) reasonText = '🛡 Protected '+formatLockRemaining(lockedHex);
+    else if (blockedHex) reasonText = '🔒 ' + ELIGIBILITY_MESSAGES[blockedHex.elig.reason];
+
+    var isBlocked = !!reasonText;
+
+    var targetRow = document.getElementById('target-row');
+    targetRow.classList.toggle('blocked', isBlocked && !lockedHex);
+    targetRow.classList.toggle('locked', !!lockedHex);
+    var label = originHex
+      ? (targetHexes.length > 1 ? (targetHexes.length+'-hex cluster at '+key) : ('Hex '+key))
+      : 'Select a hex on the map';
+    document.getElementById('target-label').textContent = reasonText || label;
+    document.getElementById('target-cost').style.visibility = isBlocked ? 'hidden' : 'visible';
+
+    var priceCents = null;
+    if (clusterComplete && !isBlocked){
+      priceCents = (radius > 0 ? priceForBulkCluster(targetHexes) : requiredPriceForHex(originHex));
+      if (state.protect) priceCents += PROTECTION_FEE_CENTS;
+    }
+    document.getElementById('target-cost').textContent = priceCents !== null ? formatCents(priceCents) : '—';
+
+    var domainInput = document.getElementById('domain-input');
+    var playerBadge = document.getElementById('player-badge');
+    if (state.player){
+      domainInput.style.display = 'none';
+      playerBadge.style.display = 'flex';
+      document.getElementById('player-name').textContent = state.player.name.toUpperCase();
+    } else {
+      domainInput.style.display = 'block';
+      playerBadge.style.display = 'none';
+    }
+
+    var consentChecked = document.getElementById('consent-check').checked;
+    var btn = document.getElementById('conquer-btn');
+    var canSubmit = !!originHex && !isBlocked && consentChecked && (state.player || parseTargetUrl(domainInput.value).ok);
+    btn.classList.toggle('ready', canSubmit);
+    document.getElementById('conquer-btn-label').textContent =
+      (originHex && originHex.ownerId && originHex.ownerId !== 'player') ? 'Attack Hex Now' : 'Conquer Hex Now';
+  }
+
+  function renderMarket(){
+    var globalCap = state.globalMarketCapBaseCents + Object.keys(state.empires).reduce(function(s,id){return s+empireValuationCents(id);},0);
+    document.getElementById('mkt-cap').textContent = formatCents(globalCap);
+    document.getElementById('mkt-events').textContent = state.totalTakeoverEvents.toLocaleString();
+    document.getElementById('mkt-avg').textContent = formatCents(Math.round(state.totalWarRevenueCents/state.totalTakeoverEvents));
+    document.getElementById('mkt-duration').textContent = formatDuration(state.avgControlDurationSeconds);
+  }
+
+  function renderAll(){
+    renderHud(); renderHallOfFame(); renderConquerPanel(); renderMarket(); renderTicker(); renderGlobalFeed();
+  }
+
+  /* ============================================================
+     Form + button wiring
+  ============================================================ */
+  document.getElementById('domain-input').addEventListener('input', renderConquerPanel);
+  document.getElementById('bulk-select').addEventListener('change', function(e){
+    state.bulkRadius = Number(e.target.value);
+    renderConquerPanel();
+  });
+  document.getElementById('protect-check').addEventListener('change', function(e){
+    state.protect = e.target.checked;
+    renderConquerPanel();
+  });
+  document.getElementById('consent-check').addEventListener('change', renderConquerPanel);
+
+  /* ---------- Legal modal (condensed excerpts of the real app's /terms and /privacy) ---------- */
+  var LEGAL_CONTENT = {
+    terms: {
+      title: 'Terms of Service',
+      html:
+        '<p>These excerpts summarize the terms governing Hex Wars purchases. Draft legal text — not final legal advice.</p>' +
+        '<h4>Merchant of Record</h4><p>All payments are processed by <strong>Paddle Payments Ltd.</strong>, our appointed Merchant of Record, who handles billing, tax (VAT/sales tax), and payment-level disputes.</p>' +
+        '<h4>Digital Goods; Instant Delivery</h4><p>Hexes are non-tangible digital advertising placements, delivered instantly and automatically upon payment confirmation.</p>' +
+        '<h4>No Refund Policy</h4><p><strong>ALL HEX PURCHASES AND TAKEOVERS ARE FINAL, INSTANT, AND NON-REFUNDABLE.</strong> Losing a hex to a hostile takeover is an intended game mechanic, not a service failure, and does not entitle you to a refund or chargeback.</p>' +
+        '<h4>Waiver of Withdrawal Rights</h4><p>You expressly request instant delivery and acknowledge waiving any statutory right of withdrawal (e.g. EU/UK 14-day cooling-off period) once processing begins.</p>' +
+        '<h4>Chargebacks</h4><p>A chargeback filed despite delivery having occurred as agreed may result in suspension of the associated account and domain. This does not limit your right to dispute a genuinely unauthorized charge.</p>'
+    },
+    privacy: {
+      title: 'Privacy Policy',
+      html:
+        '<p>These excerpts summarize how Hex Wars handles data. Draft — not final legal advice.</p>' +
+        '<h4>Data We Collect</h4><p>Technical/telemetry (IP, browser, hex-interaction history), domain/brand data (title, description, favicon fetched from the URL you submit), and billing data — full card numbers are collected solely by <strong>Paddle</strong>, never by Hex Wars.</p>' +
+        '<h4>How We Use It</h4><p>To operate the live map, prevent fraud/bot bidding, and display public conquest activity on the ticker and leaderboard.</p>' +
+        '<h4>Third Parties</h4><p>Paddle (payments), our database/hosting provider, and real-time infrastructure.</p>' +
+        '<h4>Your Rights</h4><p>You may request access, correction, or deletion of your data, including removal of a submitted domain, via support@hexwars.io.</p>'
+    }
+  };
+  function openLegalModal(kind){
+    var content = LEGAL_CONTENT[kind];
+    document.getElementById('legal-modal-title').textContent = content.title;
+    document.getElementById('legal-modal-body').innerHTML = content.html;
+    document.getElementById('legal-modal').classList.add('open');
+  }
+  function closeLegalModal(){ document.getElementById('legal-modal').classList.remove('open'); }
+  document.getElementById('link-terms').addEventListener('click', function(e){ e.preventDefault(); openLegalModal('terms'); });
+  document.getElementById('link-privacy').addEventListener('click', function(e){ e.preventDefault(); openLegalModal('privacy'); });
+  document.getElementById('legal-modal-close').addEventListener('click', closeLegalModal);
+  document.getElementById('legal-modal').addEventListener('click', function(e){
+    if (e.target.id === 'legal-modal') closeLegalModal();
+  });
+
+  document.getElementById('conquer-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    var errorEl = document.getElementById('conquer-error');
+    errorEl.textContent = '';
+    var domain = document.getElementById('domain-input').value;
+    var result = resolveConquest(domain);
+    if (!result.ok){ errorEl.textContent = result.error; return; }
+    document.getElementById('domain-input').value = '';
+  });
+
+  document.getElementById('btn-hof').addEventListener('click', function(){
+    this.classList.toggle('active');
+    flashPanel('panel-hof');
+  });
+
+  var feedOpen = false;
+  document.getElementById('btn-feed').addEventListener('click', function(){
+    feedOpen = !feedOpen;
+    document.getElementById('global-feed').classList.toggle('open', feedOpen);
+    this.classList.toggle('active', feedOpen);
+    if (feedOpen) renderGlobalFeed();
+  });
+
+  /* ============================================================
+     Main loop
+  ============================================================ */
+  var lastFrame = performance.now();
+  function frame(now){
+    requestAnimationFrame(frame);
+    var dt = Math.min((now-lastFrame)/1000, 0.05);
+    lastFrame = now;
+
+    // Momentum pan decay
+    if (!isPointerDown && (Math.abs(momentum.x) > 0.0005 || Math.abs(momentum.z) > 0.0005)){
+      worldGroup.position.addScaledVector(camRight, momentum.x);
+      worldGroup.position.addScaledVector(camForward, momentum.z);
+      momentum.x *= 0.9; momentum.z *= 0.9;
+    }
+
+    // Hover elevation lerp for the currently hovered empty instance
+    var hoveredIsEmpty = state.hoveredKey && emptyCoords.some(function(c){return hexKey(c)===state.hoveredKey;});
+    emptyCoords.forEach(function(c,i){
+      if (emptyElevations[i] <= -40) return; // conquered instance, parked below the map
+      var target = (hoveredIsEmpty && hexKey(c)===state.hoveredKey) ? 0.15 : 0;
+      if (Math.abs(emptyElevations[i]-target) > 0.001){
+        emptyElevations[i] = THREE.MathUtils.lerp(emptyElevations[i], target, Math.min(dt*12,1));
+        writeEmptyInstance(i, emptyElevations[i]);
+      }
+    });
+
+    // Under-attack pulse for contested empires' prisms — reset to the resting intensity once
+    // the conflict window closes, so a hex doesn't freeze mid-pulse at a random brightness.
+    Object.keys(state.empires).forEach(function(id){
+      var e = state.empires[id];
+      var inConflict = e.conflictUntil > now;
+      var intensity = inConflict ? (0.5 + Math.sin(now*0.012)*0.35) : 0.35;
+      empireHexes(id).forEach(function(h){
+        var m = brandMeshesByKey[hexKey(h.coord)];
+        if (m) m.material.emissiveIntensity = intensity;
+      });
+    });
+
+    // Selected hex's neon outline breathes gently so it reads as "glowing," not static.
+    if (selectRing.visible){
+      selectRing.material.opacity = 0.45 + Math.sin(now*0.005)*0.22;
+    }
+
+    for (var i=animations.length-1;i>=0;i--){
+      if (!animations[i].update(now)) animations.splice(i,1);
+    }
+
+    renderCountdown();
+    renderer.render(scene, camera);
+  }
+
+  document.fonts.ready.then(function(){
+    Object.keys(state.empires).forEach(rebuildPlaquesForOwner);
+    document.getElementById('loading-veil').classList.add('hidden');
+    renderAll();
+    requestAnimationFrame(frame);
+  });
+
+  setInterval(function(){ renderMarket(); renderHud(); renderGlobalFeed(); }, 4000);
+})();
+</script>

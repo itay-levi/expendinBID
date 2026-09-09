@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { parseTargetUrl } from '@/lib/validation/targetUrlSchema'
+import { DEFAULT_BRAND_COLOR, dominantColorFromPixels, ensureReadableOnMap } from './dominantColor'
+import { logoProxyUrl } from './logoProxyUrl'
 import type { PendingBrand } from '@/lib/state/gameStore'
 
 export type BrandPreviewState =
@@ -91,6 +93,15 @@ export function useBrandPreview(input: string): BrandPreviewState {
         // claim proceeds on the hostname plus the public favicon service, which needs no
         // cooperation from the target at all — and the server applies exactly the same fallback,
         // so what is previewed here is what lands on the map.
+        const resolvedLogo =
+          !response.ok || !body?.success
+            ? `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`
+            : (body.data.logoUrl as string)
+
+        // Sampled from the logo we just resolved, so the map preview renders in their real colour
+        // rather than a placeholder every empire shares.
+        const primaryColorHex = await sampleBrandColor(resolvedLogo)
+
         const brand: PendingBrand =
           !response.ok || !body?.success
             ? {
@@ -98,14 +109,16 @@ export function useBrandPreview(input: string): BrandPreviewState {
                 domain: hostname,
                 title: hostname,
                 description: '',
-                logoUrl: `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`,
+                logoUrl: resolvedLogo,
+                primaryColorHex,
               }
             : {
                 url: parsed.url,
                 domain: hostname,
                 title: body.data.title,
                 description: body.data.description,
-                logoUrl: body.data.logoUrl,
+                logoUrl: resolvedLogo,
+                primaryColorHex,
               }
 
         previewCache.set(parsed.url, brand)
@@ -122,6 +135,7 @@ export function useBrandPreview(input: string): BrandPreviewState {
           title: hostname,
           description: '',
           logoUrl: `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`,
+          primaryColorHex: DEFAULT_BRAND_COLOR,
         }
         previewCache.set(parsed.url, brand)
         setState({ status: 'ready', brand })
@@ -135,4 +149,49 @@ export function useBrandPreview(input: string): BrandPreviewState {
   }, [input])
 
   return state
+}
+
+/**
+ * Samples a logo for its dominant colour, in the browser.
+ *
+ * Done client-side because the image is already being fetched for display, and decoding a PNG or
+ * JPEG server-side would mean a new image-processing dependency for one hex value. The result is
+ * sent with the claim and re-validated there — a colour is cosmetic, but nothing arriving from a
+ * client reaches a canvas or a stylesheet unchecked.
+ *
+ * Resolves to the fallback rather than rejecting: a brand with no readable colour is a cosmetic
+ * downgrade, never a reason a purchase cannot proceed.
+ */
+export async function sampleBrandColor(logoUrl: string | null): Promise<string> {
+  const proxied = logoProxyUrl(logoUrl)
+  if (!proxied) return DEFAULT_BRAND_COLOR
+
+  return new Promise((resolve) => {
+    const image = new Image()
+    image.crossOrigin = 'anonymous'
+
+    image.onload = () => {
+      try {
+        // Small fixed canvas: colour is being counted, not rendered, and 64x64 is ample for a
+        // dominant hue while keeping the pixel loop trivial.
+        const size = 64
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (!ctx) return resolve(DEFAULT_BRAND_COLOR)
+
+        ctx.drawImage(image, 0, 0, size, size)
+        const { data } = ctx.getImageData(0, 0, size, size)
+        resolve(ensureReadableOnMap(dominantColorFromPixels(data, 1)))
+      } catch {
+        // A tainted canvas throws on getImageData. The proxy makes the logo same-origin so this
+        // should not happen, but a colour is never worth failing over.
+        resolve(DEFAULT_BRAND_COLOR)
+      }
+    }
+
+    image.onerror = () => resolve(DEFAULT_BRAND_COLOR)
+    image.src = proxied
+  })
 }

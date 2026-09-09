@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hex Wars — three ways to make the flow obvious</title>
+<style>
+  :root{--bg:#0B0E14;--grid:#1E2638;--edge:#2A364F;--cyan:#00F0FF;--green:#00FF87;
+        --coral:#FF3366;--amber:#FBBF24;--muted:rgba(255,255,255,.5);--line:rgba(255,255,255,.09)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:rgba(255,255,255,.92);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:20px 24px 8px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:18px}
+  .sub{color:var(--muted);font-size:13px;max-width:80ch}
+  .tabs{display:flex;gap:8px;padding:14px 24px 0;flex-wrap:wrap}
+  .tab{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--muted);
+       border-radius:999px;padding:7px 15px;cursor:pointer;font:inherit;font-size:12.5px}
+  .tab[aria-selected="true"]{border-color:var(--cyan);color:var(--cyan);background:rgba(0,240,255,.1)}
+  main{padding:16px 24px 30px;display:flex;gap:20px;flex-wrap:wrap}
+  .stageWrap{flex:1 1 560px;min-width:320px}
+  .stage{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+         background:#0d111a}
+  svg{width:100%;height:auto;display:block}
+  aside{flex:0 1 320px;min-width:270px;display:flex;flex-direction:column;gap:12px}
+  .card{border:1px solid var(--line);border-radius:14px;background:rgba(15,18,26,.6);padding:13px 15px}
+  .card h2{margin:0 0 8px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .v{font-size:12.5px}.v div{padding:3px 0}
+  .v b{color:var(--green)} .v i{color:var(--coral);font-style:normal}
+  .panel{display:none}.panel[data-active="true"]{display:block}
+
+  /* shared claim bar */
+  .bar{border-top:1px solid var(--line);background:rgba(10,13,20,.9);padding:11px 13px}
+  .steps{display:flex;gap:16px;margin-bottom:9px}
+  .step{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;
+        letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.32)}
+  .step .n{width:17px;height:17px;border-radius:50%;background:rgba(255,255,255,.1);
+           display:grid;place-items:center;font-size:9.5px}
+  .step.on{color:var(--green)} .step.on .n{background:var(--green);color:#08131c}
+  .step.now{color:var(--cyan)} .step.now .n{background:var(--cyan);color:#08131c;
+            animation:pulse 1.3s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.18);opacity:.75}}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--line);
+    border-radius:10px;padding:9px 11px;color:#fff;font:inherit;font-size:13px;outline:none}
+  input[type=text]:focus{border-color:var(--cyan)}
+  input.glow{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,240,255,.16)}
+  .pay{background:var(--green);color:#08131c;border:0;border-radius:10px;padding:9px 15px;
+       font:inherit;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.05em;cursor:pointer}
+  .pay[disabled]{background:rgba(255,255,255,.1);color:rgba(255,255,255,.3);cursor:not-allowed}
+  .tot{font-family:ui-monospace,monospace;font-weight:800;color:var(--green);font-size:16px;min-width:74px;text-align:right}
+
+  /* A — hero */
+  .hero{position:absolute;inset:0;background:rgba(5,7,12,.82);backdrop-filter:blur(3px);
+        display:grid;place-items:center;z-index:5;transition:opacity .25s}
+  .heroCard{width:min(400px,86%);border:1px solid var(--line);border-radius:18px;
+            background:rgba(15,18,26,.96);padding:22px;text-align:center}
+  .heroCard h3{margin:0 0 5px;font-size:19px}
+  .heroCard p{margin:0 0 15px;color:var(--muted);font-size:12.5px}
+
+  /* B — inline ask */
+  .ask{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:5;
+       border:1px solid var(--cyan);border-radius:12px;background:rgba(10,13,20,.97);
+       padding:12px 14px;width:min(370px,88%);box-shadow:0 12px 34px rgba(0,0,0,.55)}
+  .ask h4{margin:0 0 3px;font-size:13.5px}
+  .ask p{margin:0 0 10px;color:var(--muted);font-size:11.5px}
+
+  /* C — coach mark */
+  .coach{position:absolute;z-index:5;border:1px solid var(--cyan);border-radius:11px;
+         background:rgba(0,240,255,.12);color:var(--cyan);padding:8px 12px;font-size:12px;
+         font-weight:600;box-shadow:0 0 0 3px rgba(0,240,255,.1)}
+  .coach:after{content:"";position:absolute;bottom:-7px;left:26px;width:12px;height:12px;
+               background:rgba(0,240,255,.12);border-right:1px solid var(--cyan);
+               border-bottom:1px solid var(--cyan);transform:rotate(45deg)}
+  .dim{filter:brightness(.42) saturate(.5);transition:filter .3s}
+  .note{color:var(--muted);font-size:11.5px;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>“Enter your domain first” — how do we stop people missing that?</h1>
+  <p class="sub">
+    Today the map only comes alive after you type a URL, but nothing says so. Someone lands, clicks
+    a tile, sees no preview and no arrows, and concludes the site is broken. Three ways to fix it —
+    each one is live below, so click through and see which reads fastest.
+  </p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" data-tab="a" aria-selected="true">A · Ask first (hero)</button>
+  <button class="tab" role="tab" data-tab="b" aria-selected="false">B · Click first, ask on demand</button>
+  <button class="tab" role="tab" data-tab="c" aria-selected="false">C · Guided stepper</button>
+</div>
+
+<main>
+  <div class="stageWrap">
+    <!-- A -->
+    <section class="panel" data-panel="a" data-active="true">
+      <div class="stage">
+        <div id="mapA"><svg viewBox="0 0 620 300" id="svgA"></svg></div>
+        <div class="hero" id="heroA">
+          <div class="heroCard">
+            <h3>Put your brand on the map</h3>
+            <p>Type your address — we’ll pull your logo automatically.</p>
+            <div class="row">
+              <input type="text" id="inA" placeholder="yourcompany.com" />
+              <button class="pay" id="goA">Show me</button>
+            </div>
+          </div>
+        </div>
+        <div class="bar">
+          <div class="steps">
+            <div class="step on" id="sA1"><span class="n">✓</span>Your site</div>
+            <div class="step now" id="sA2"><span class="n">2</span>Pick tiles</div>
+            <div class="step" id="sA3"><span class="n">3</span>Pay</div>
+          </div>
+          <div class="row">
+            <input type="text" id="barA" placeholder="yourcompany.com" disabled />
+            <span class="tot" id="totA">—</span>
+            <button class="pay" disabled id="payA">Pay</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">The map is dimmed until you answer. One field, one button, impossible to walk past.</p>
+    </section>
+
+    <!-- B -->
+    <section class="panel" data-panel="b">
+      <div class="stage">
+        <div id="mapB"><svg viewBox="0 0 620 300" id="svgB"></svg></div>
+        <div id="askB"></div>
+        <div class="bar">
+          <div class="steps">
+            <div class="step now" id="sB1"><span class="n">1</span>Pick tiles</div>
+            <div class="step" id="sB2"><span class="n">2</span>Your site</div>
+            <div class="step" id="sB3"><span class="n">3</span>Pay</div>
+          </div>
+          <div class="row">
+            <input type="text" id="barB" placeholder="click a tile to begin…" />
+            <span class="tot" id="totB">—</span>
+            <button class="pay" disabled id="payB">Pay</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">Map is live immediately. Click any tile — the ask appears the moment you show intent.</p>
+    </section>
+
+    <!-- C -->
+    <section class="panel" data-panel="c">
+      <div class="stage">
+        <div id="mapC" class="dim"><svg viewBox="0 0 620 300" id="svgC"></svg></div>
+        <div class="coach" id="coachC" style="left:16px;bottom:96px">
+          ← Start here: enter your website
+        </div>
+        <div class="bar">
+          <div class="steps">
+            <div class="step now" id="sC1"><span class="n">1</span>Your site</div>
+            <div class="step" id="sC2"><span class="n">2</span>Pick tiles</div>
+            <div class="step" id="sC3"><span class="n">3</span>Pay</div>
+          </div>
+          <div class="row">
+            <input type="text" id="barC" class="glow" placeholder="yourcompany.com" />
+            <span class="tot" id="totC">—</span>
+            <button class="pay" disabled id="payC">Pay</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">Nothing blocks you, but the map is visibly asleep and one control is lit. Type to wake it.</p>
+    </section>
+  </div>
+
+  <aside>
+    <div class="card"><h2>What happened</h2><div class="v" id="ro">Pick a tab and try it…</div></div>
+    <div class="card"><h2>Trade-offs</h2><div class="v" id="tradeoffs"></div></div>
+    <div class="card"><h2>Reset</h2>
+      <button class="pay" id="reset" style="background:rgba(255,255,255,.08);color:#fff">Reset all</button></div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const NS='http://www.w3.org/2000/svg', S=34
+  const RIVALS=[['ORBIT','#38BDF8'],['LATTICE','#FBBF24'],['VOLT','#F97316']]
+  const px=(q,r)=>({x:310+S*1.5*q,y:150+S*Math.sqrt(3)*(q/2+r)})
+  const cor=i=>({x:S*Math.cos(Math.PI/3*i),y:S*Math.sin(Math.PI/3*i)})
+  const COORDS=[];for(let q=-4;q<=4;q++)for(let r=-2;r<=2;r++)if(Math.abs(q+r)<=4)COORDS.push([q,r])
+  const K=(q,r)=>`${q},${r}`
+
+  const TRADE={
+    a:`<div><b>+</b> Cannot be missed — it is the only thing on screen</div>
+       <div><b>+</b> Logo appears instantly = the “aha” moment</div>
+       <div><b>+</b> Every later step has your brand ready</div>
+       <div><i>−</i> A wall before anyone has seen the product</div>
+       <div><i>−</i> Some people bounce at any form</div>`,
+    b:`<div><b>+</b> Zero friction — explore first, commit later</div>
+       <div><b>+</b> Asks at the exact moment of intent</div>
+       <div><b>+</b> Clicking tiles is fun and self-teaching</div>
+       <div><i>−</i> No preview until they type, so the first
+            clicks look like nothing happened</div>`,
+    c:`<div><b>+</b> Keeps the current flow, just louder</div>
+       <div><b>+</b> Nothing is blocked; browsing still works</div>
+       <div><b>+</b> Cheapest to build by far</div>
+       <div><i>−</i> Still relies on people noticing a hint</div>
+       <div><i>−</i> A dimmed map may just read as “broken”</div>`,
+  }
+
+  const state={a:{brand:null,sel:new Set()},b:{brand:null,sel:new Set()},c:{brand:null,sel:new Set()}}
+  const say=h=>document.getElementById('ro').innerHTML=h
+
+  function draw(p){
+    const svg=document.getElementById('svg'+p.toUpperCase());svg.innerHTML=''
+    const st=state[p]
+    COORDS.forEach(([q,r],i)=>{
+      const {x,y}=px(q,r)
+      const owned=i%4===0?RIVALS[i%RIVALS.length]:null
+      const sel=st.sel.has(K(q,r))
+      const pts=Array.from({length:6},(_,k)=>{const c=cor(k);return `${x+c.x},${y+c.y}`}).join(' ')
+      const poly=document.createElementNS(NS,'polygon')
+      poly.setAttribute('points',pts)
+      poly.setAttribute('fill', sel&&st.brand?'#7C3AED':owned?owned[1]:'#1E2638')
+      poly.setAttribute('fill-opacity',sel||owned?'.9':'1')
+      poly.setAttribute('stroke',sel?'#00FF87':owned?'rgba(255,255,255,.28)':'#2A364F')
+      poly.setAttribute('stroke-width',sel?'3.5':'2')
+      poly.setAttribute('style','cursor:pointer')
+      poly.addEventListener('click',()=>onTile(p,q,r,owned))
+      svg.appendChild(poly)
+      const label = sel&&st.brand ? st.brand : owned ? owned[0] : ''
+      if(label){
+        const t=document.createElementNS(NS,'text')
+        t.setAttribute('x',x);t.setAttribute('y',y+4);t.setAttribute('text-anchor','middle')
+        t.setAttribute('font-size','9');t.setAttribute('font-weight','800')
+        t.setAttribute('fill','rgba(9,12,18,.85)');t.setAttribute('pointer-events','none')
+        t.textContent=label.length>9?label.slice(0,8)+'…':label
+        svg.appendChild(t)
+      }
+    })
+    const n=st.sel.size
+    document.getElementById('tot'+p.toUpperCase()).textContent = n?'$'+(n*(n+1)/2*10).toFixed(2):'—'
+    const pay=document.getElementById('pay'+p.toUpperCase())
+    pay.disabled = !(n&&st.brand)
+    pay.textContent = n&&st.brand ? 'Pay $'+(n*(n+1)/2*10).toFixed(2) : 'Pay'
+  }
+
+  function onTile(p,q,r,owned){
+    const st=state[p]
+    if(p==='a'&&!st.brand){say('<i>Blocked.</i> The hero is still up — you cannot reach the map yet.');return}
+    const k=K(q,r); st.sel.has(k)?st.sel.delete(k):st.sel.add(k)
+
+    if(p==='b'&&!st.brand){
+      showAskB()
+      say('<b>Tile selected.</b> The ask slid up automatically — identity is requested at the exact moment it is needed, not before.')
+    } else if(p==='c'&&!st.brand){
+      say('<i>Nothing visible happened.</i> That is the failure this tab is trying to prevent — the hint and the dimmed map are the only clues.')
+    } else {
+      say(`<b>${st.sel.size} tile${st.sel.size===1?'':'s'}</b> selected, previewing as <b>${st.brand}</b>.`)
+    }
+    step(p);draw(p)
+  }
+
+  function step(p){
+    const st=state[p],P=p.toUpperCase()
+    const set=(el,cls)=>{el.className='step '+cls}
+    if(p==='b'){
+      set(document.getElementById('sB1'), st.sel.size?'on':'now')
+      set(document.getElementById('sB2'), st.brand?'on':st.sel.size?'now':'')
+      set(document.getElementById('sB3'), st.brand&&st.sel.size?'now':'')
+    } else {
+      set(document.getElementById('s'+P+'1'), st.brand?'on':'now')
+      set(document.getElementById('s'+P+'2'), st.sel.size?'on':st.brand?'now':'')
+      set(document.getElementById('s'+P+'3'), st.brand&&st.sel.size?'now':'')
+    }
+  }
+
+  function showAskB(){
+    document.getElementById('askB').innerHTML =
+      `<div class="ask"><h4>Nice — where should this link to?</h4>
+       <p>We’ll pull your logo and put it on those tiles.</p>
+       <div class="row"><input type="text" id="inB" placeholder="yourcompany.com" />
+       <button class="pay" id="goB">Continue</button></div></div>`
+    const inp=document.getElementById('inB');inp.focus()
+    document.getElementById('goB').addEventListener('click',()=>{
+      const v=inp.value.trim();if(!v)return
+      state.b.brand=v;document.getElementById('barB').value=v
+      document.getElementById('askB').innerHTML=''
+      say(`<b>${v}</b> loaded. Your logo is now on the tiles you already picked — no backtracking.`)
+      step('b');draw('b')
+    })
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('goB').click()})
+  }
+
+  document.getElementById('goA').addEventListener('click',()=>{
+    const v=document.getElementById('inA').value.trim();if(!v)return
+    state.a.brand=v
+    document.getElementById('barA').value=v
+    document.getElementById('barA').disabled=false
+    const h=document.getElementById('heroA');h.style.opacity='0'
+    setTimeout(()=>h.style.display='none',260)
+    say(`<b>${v}</b> loaded before you touched the map. Every tile you click from here previews instantly.`)
+    step('a');draw('a')
+  })
+  document.getElementById('inA').addEventListener('keydown',e=>{
+    if(e.key==='Enter')document.getElementById('goA').click()})
+
+  document.getElementById('barC').addEventListener('input',e=>{
+    const v=e.target.value.trim()
+    state.c.brand=v||null
+    document.getElementById('mapC').className=v?'':'dim'
+    document.getElementById('coachC').style.display=v?'none':''
+    e.target.classList.toggle('glow',!v)
+    say(v?`<b>${v}</b> entered — the map woke up. Now the tiles do something when clicked.`
+         :'Map is asleep until you identify yourself.')
+    step('c');draw('c')
+  })
+
+  document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',String(x===t)))
+    document.querySelectorAll('.panel').forEach(pn=>
+      pn.dataset.active=String(pn.dataset.panel===t.dataset.tab))
+    document.getElementById('tradeoffs').innerHTML=TRADE[t.dataset.tab]
+    say('Try it →')
+  }))
+
+  document.getElementById('reset').addEventListener('click',()=>location.reload())
+
+  document.getElementById('tradeoffs').innerHTML=TRADE.a
+  ;['a','b','c'].forEach(p=>{step(p);draw(p)})
+})()
+</script>
+</body>
+</html>

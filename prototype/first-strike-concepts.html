@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hex Wars — how a newcomer takes their first tile</title>
+<style>
+  :root{--bg:#0B0E14;--grid:#1E2638;--edge:#2A364F;--cyan:#00F0FF;--green:#00FF87;--coral:#FF3366;
+        --amber:#FBBF24;--muted:rgba(255,255,255,.5);--line:rgba(255,255,255,.09)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:rgba(255,255,255,.92);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:20px 24px 6px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:18px}
+  .sub{color:var(--muted);font-size:13px;max-width:76ch}
+  .tabs{display:flex;gap:8px;padding:14px 24px 0;flex-wrap:wrap}
+  .tab{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--muted);
+       border-radius:999px;padding:7px 15px;cursor:pointer;font:inherit;font-size:12.5px}
+  .tab[aria-selected="true"]{border-color:var(--cyan);color:var(--cyan);background:rgba(0,240,255,.1)}
+  main{padding:16px 24px 28px}
+  .panel{display:none;gap:20px;flex-wrap:wrap}
+  .panel[data-active="true"]{display:flex}
+  .stage{flex:1 1 500px;min-width:300px}
+  svg{width:100%;height:auto;display:block;touch-action:none}
+  aside{flex:0 1 320px;min-width:270px;display:flex;flex-direction:column;gap:12px}
+  .card{border:1px solid var(--line);border-radius:14px;background:rgba(15,18,26,.6);padding:13px 15px}
+  .card h2{margin:0 0 8px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .verdict{font-size:12.5px}
+  .verdict b{color:var(--green)}
+  .verdict i{color:var(--coral);font-style:normal}
+  .verdict div{padding:3px 0}
+  .bar{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;
+       background:rgba(255,255,255,.05);padding:10px 12px;margin-top:10px}
+  .chip{width:30px;height:30px;border-radius:7px;background:#7C3AED;display:grid;place-items:center;
+        color:#fff;font-weight:800;font-size:13px;flex:none}
+  .chip.draggable{cursor:grab;touch-action:none}
+  .chip.draggable:active{cursor:grabbing}
+  button.act{background:var(--green);color:#08131c;border:0;border-radius:10px;padding:9px 14px;
+             font:inherit;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.05em;cursor:pointer}
+  button.ghost{background:rgba(255,255,255,.07);color:rgba(255,255,255,.85);border:1px solid var(--line)}
+  .banner{margin-top:10px;border:1px solid rgba(251,191,36,.5);background:rgba(251,191,36,.13);
+          color:var(--amber);border-radius:10px;padding:9px 12px;font-size:12.5px;
+          display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .price{font-family:ui-monospace,monospace;font-size:12.5px}
+  .price div{display:flex;justify-content:space-between;padding:3px 0}
+  .price .tot{border-top:1px solid var(--line);margin-top:5px;padding-top:6px;font-weight:800;color:var(--green)}
+  #log{font-size:12px;color:var(--muted);max-height:110px;overflow:auto}
+  #log div{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+  .dragGhost{position:fixed;pointer-events:none;z-index:99;width:38px;height:38px;border-radius:9px;
+             background:#7C3AED;display:grid;place-items:center;color:#fff;font-weight:800;
+             box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:.92;transform:translate(-50%,-50%)}
+</style>
+</head>
+<body>
+<header>
+  <h1>The map's centre is full. A newcomer wants in. Three ways.</h1>
+  <p class="sub">
+    Every tile below is already owned. You are <b>YOURCO</b> and hold nothing, so you have no border
+    to attack from — today that means no arrows, and clicking any tile just opens its owner's site.
+    Try each option and see which one you'd want to use.
+  </p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" data-tab="a" aria-selected="true">A · Beachhead marker</button>
+  <button class="tab" role="tab" data-tab="b" aria-selected="false">B · Drag your logo</button>
+  <button class="tab" role="tab" data-tab="c" aria-selected="false">C · “Place flag” button</button>
+</div>
+
+<main>
+  <section class="panel" data-panel="a" data-active="true">
+    <div class="stage">
+      <svg id="svgA" viewBox="0 0 560 400"></svg>
+      <div class="bar"><span class="chip">Y</span><span>yourco.com</span>
+        <span class="hint" style="margin:0 0 0 auto">Hover a tile — a flag appears</span></div>
+    </div>
+    <aside>
+      <div class="card"><h2>What happens</h2><div class="verdict" id="roA">Hover any tile…</div></div>
+      <div class="card"><h2>Verdict</h2><div class="verdict">
+        <div><b>+</b> Reuses the arrow you already have</div>
+        <div><b>+</b> Appears only when you hold nothing</div>
+        <div><b>+</b> No new gesture — fine on touch</div>
+        <div><b>+</b> Vanishes the moment you land</div>
+        <div><i>−</i> Flags on every tile at once, briefly</div>
+      </div></div>
+      <div class="card"><h2>Log</h2><div id="logA"></div>
+        <div style="margin-top:9px"><button class="act ghost" data-reset="a">Reset</button></div></div>
+    </aside>
+  </section>
+
+  <section class="panel" data-panel="b">
+    <div class="stage">
+      <svg id="svgB" viewBox="0 0 560 400"></svg>
+      <div class="bar"><span class="chip draggable" id="chipB">Y</span><span>yourco.com</span>
+        <span class="hint" style="margin:0 0 0 auto">Drag the purple chip onto a tile</span></div>
+    </div>
+    <aside>
+      <div class="card"><h2>What happens</h2><div class="verdict" id="roB">Drag the chip…</div></div>
+      <div class="card"><h2>Verdict</h2><div class="verdict">
+        <div><b>+</b> A drag is not a click — zero ambiguity</div>
+        <div><b>+</b> Very discoverable, the chip invites it</div>
+        <div><b>+</b> Thematically it IS planting a flag</div>
+        <div><i>−</i> Fights camera panning on a phone</div>
+        <div><i>−</i> Most new machinery to build</div>
+      </div></div>
+      <div class="card"><h2>Log</h2><div id="logB"></div>
+        <div style="margin-top:9px"><button class="act ghost" data-reset="b">Reset</button></div></div>
+    </aside>
+  </section>
+
+  <section class="panel" data-panel="c">
+    <div class="stage">
+      <svg id="svgC" viewBox="0 0 560 400"></svg>
+      <div class="bar"><span class="chip">Y</span><span>yourco.com</span>
+        <button class="act" id="armC" style="margin-left:auto">⚑ Place your flag</button></div>
+      <div id="bannerC"></div>
+    </div>
+    <aside>
+      <div class="card"><h2>What happens</h2><div class="verdict" id="roC">Press “Place your flag”…</div></div>
+      <div class="card"><h2>Verdict</h2><div class="verdict">
+        <div><b>+</b> Explicit, and clears itself after one tap</div>
+        <div><b>+</b> Easiest on touch</div>
+        <div><i>−</i> An extra press before every first tile</div>
+        <div><i>−</i> Reintroduces a mode, however brief</div>
+      </div></div>
+      <div class="card"><h2>Log</h2><div id="logC"></div>
+        <div style="margin-top:9px"><button class="act ghost" data-reset="c">Reset</button></div></div>
+    </aside>
+  </section>
+
+  <section class="card" style="margin-top:18px">
+    <h2>Pricing — should landing cost extra?</h2>
+    <div style="display:flex;gap:26px;flex-wrap:wrap">
+      <div class="price" style="min-width:260px">
+        <div style="color:var(--muted);margin-bottom:4px">WITH a landing premium</div>
+        <div><span>Owner last paid</span><span>$40.00</span></div>
+        <div><span>Takeover ×1.5</span><span>$60.00</span></div>
+        <div><span>Landing ×2</span><span>$120.00</span></div>
+        <div class="tot"><span>First tile, centre</span><span>$120.00</span></div>
+        <div style="color:var(--muted);margin-top:7px;font-family:inherit;font-size:12px">
+          Landing skips the fight to the border. Charging for the shortcut stops it
+          undercutting the expansion it replaces.
+        </div>
+      </div>
+      <div class="price" style="min-width:260px">
+        <div style="color:var(--muted);margin-bottom:4px">FLAT — same as any takeover</div>
+        <div><span>Owner last paid</span><span>$40.00</span></div>
+        <div><span>Takeover ×1.5</span><span>$60.00</span></div>
+        <div class="tot"><span>First tile, centre</span><span>$60.00</span></div>
+        <div style="color:var(--coral);margin-top:7px;font-family:inherit;font-size:12px">
+          Lowest barrier to entry — but then landing always beats expanding,
+          so nobody would ever expand.
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const NS='http://www.w3.org/2000/svg', SIZE=40, OX=250, OY=190
+  const RIVALS=[['ORBIT','#38BDF8'],['LATTICE','#FBBF24'],['VOLT','#F97316'],['PIXEL','#EC4899']]
+  const px=(q,r)=>({x:OX+SIZE*1.5*q,y:OY+SIZE*Math.sqrt(3)*(q/2+r)})
+  const cor=i=>({x:SIZE*Math.cos(Math.PI/3*i),y:SIZE*Math.sin(Math.PI/3*i)})
+  const K=(q,r)=>`${q},${r}`
+  const COORDS=[]
+  for(let q=-2;q<=2;q++)for(let r=-2;r<=2;r++)if(Math.abs(q+r)<=2)COORDS.push([q,r])
+
+  const state={}
+  const fresh=()=>{const o={};COORDS.forEach(([q,r],i)=>o[K(q,r)]=RIVALS[i%RIVALS.length]);return o}
+  for(const p of ['a','b','c']) state[p]={owners:fresh(),armed:false}
+
+  const log=(p,msg,col)=>{const el=document.getElementById('log'+p.toUpperCase())
+    const d=document.createElement('div');d.innerHTML=`<span style="color:${col}">●</span> ${msg}`;el.prepend(d)}
+  const say=(p,html)=>document.getElementById('ro'+p.toUpperCase()).innerHTML=html
+
+  const PRICE={owner:40,take:60,land:120}
+
+  function land(p,q,r){
+    state[p].owners[K(q,r)]=['YOURCO','#7C3AED']
+    state[p].armed=false
+    if(p==='c') document.getElementById('bannerC').innerHTML=''
+    log(p,`Landed on ${q},${r} · $${PRICE.land.toFixed(2)}`,'#00FF87')
+    say(p,`<b>Landed.</b> You now hold ground in the centre.<br>
+      From here normal arrows take over — expand outward from this tile.`)
+    draw(p)
+  }
+
+  function draw(p){
+    const svg=document.getElementById('svg'+p.toUpperCase())
+    svg.innerHTML=''
+    const st=state[p]
+    const mine=Object.entries(st.owners).some(([,v])=>v[0]==='YOURCO')
+
+    for(const [q,r] of COORDS){
+      const {x,y}=px(q,r), [name,col]=st.owners[K(q,r)]
+      const pts=Array.from({length:6},(_,i)=>{const c=cor(i);return `${x+c.x},${y+c.y}`}).join(' ')
+      const poly=document.createElementNS(NS,'polygon')
+      poly.setAttribute('points',pts);poly.setAttribute('fill',col)
+      poly.setAttribute('fill-opacity','.85');poly.setAttribute('stroke','rgba(255,255,255,.3)')
+      poly.setAttribute('stroke-width','2');poly.setAttribute('style','cursor:pointer')
+      poly.dataset.q=q;poly.dataset.r=r
+
+      poly.addEventListener('mouseenter',()=>{
+        poly.setAttribute('stroke','#00F0FF');poly.setAttribute('stroke-width','3.5')
+        if(name==='YOURCO'){say(p,'<b>Your territory.</b>');return}
+        if(p==='c'&&st.armed){say(p,`<b>Armed.</b> Tap to land on ${name} · $${PRICE.land.toFixed(2)}`);return}
+        if(p==='b'){say(p,`<b>${name}</b><br>Click → opens their site.<br>Drag the chip here → land · $${PRICE.land.toFixed(2)}`);return}
+        if(p==='a'&&!mine){say(p,`<b>${name}</b><br>Click the tile → opens their site.<br>Click the ⚑ → land here · $${PRICE.land.toFixed(2)}`);return}
+        say(p,`<b>${name}</b><br>Click → opens their site.`)
+      })
+      poly.addEventListener('mouseleave',()=>{
+        poly.setAttribute('stroke','rgba(255,255,255,.3)');poly.setAttribute('stroke-width','2')})
+      poly.addEventListener('click',()=>{
+        if(name==='YOURCO')return
+        if(p==='c'&&st.armed){land(p,q,r);return}
+        log(p,`Opened ${name.toLowerCase()}.com — you left the map`,'#00F0FF')
+        say(p,`<i>You just left for ${name}'s website.</i><br>That is today's behaviour, and it is the trap.`)
+      })
+      svg.appendChild(poly)
+
+      const t=document.createElementNS(NS,'text')
+      t.setAttribute('x',x);t.setAttribute('y',y+4);t.setAttribute('text-anchor','middle')
+      t.setAttribute('font-size','10');t.setAttribute('font-weight','800')
+      t.setAttribute('fill','rgba(9,12,18,.8)');t.setAttribute('pointer-events','none')
+      t.textContent=name
+      svg.appendChild(t)
+    }
+
+    // Option A: a flag on every rival tile, but only while you hold nothing.
+    if(p==='a'&&!mine){
+      for(const [q,r] of COORDS){
+        const {x,y}=px(q,r)
+        const g=document.createElementNS(NS,'g')
+        g.setAttribute('transform',`translate(${x},${y-14})`);g.setAttribute('style','cursor:pointer')
+        const hit=document.createElementNS(NS,'circle')
+        hit.setAttribute('r',17);hit.setAttribute('fill','transparent');g.appendChild(hit)
+        const disc=document.createElementNS(NS,'circle')
+        disc.setAttribute('r',13);disc.setAttribute('fill','rgba(9,12,18,.75)')
+        disc.setAttribute('stroke','#00FF87');disc.setAttribute('stroke-width','2');g.appendChild(disc)
+        const flag=document.createElementNS(NS,'path')
+        flag.setAttribute('d','M -4 6 L -4 -7 L 6 -4 L -4 -1')
+        flag.setAttribute('fill','#00FF87');flag.setAttribute('stroke','#00FF87')
+        flag.setAttribute('stroke-width','1.6');flag.setAttribute('stroke-linejoin','round')
+        g.appendChild(flag)
+        g.addEventListener('mouseenter',()=>{disc.setAttribute('fill','rgba(0,255,135,.35)')
+          say(p,`<b>Land here</b> · $${PRICE.land.toFixed(2)}<br>Skips the fight to the border.`)})
+        g.addEventListener('mouseleave',()=>disc.setAttribute('fill','rgba(9,12,18,.75)'))
+        g.addEventListener('click',e=>{e.stopPropagation();land(p,q,r)})
+        svg.appendChild(g)
+      }
+    }
+  }
+
+  // Option B — drag the chip onto a tile.
+  let ghost=null
+  const chip=document.getElementById('chipB')
+  chip.addEventListener('pointerdown',e=>{
+    e.preventDefault();chip.setPointerCapture(e.pointerId)
+    ghost=document.createElement('div');ghost.className='dragGhost';ghost.textContent='Y'
+    document.body.appendChild(ghost);move(e)
+    say('b','<b>Dragging…</b> drop on any tile to land there.')
+  })
+  const move=e=>{if(ghost){ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px'}}
+  chip.addEventListener('pointermove',move)
+  chip.addEventListener('pointerup',e=>{
+    if(!ghost)return
+    ghost.remove();ghost=null
+    const el=document.elementFromPoint(e.clientX,e.clientY)
+    if(el&&el.tagName==='polygon'&&el.dataset.q!==undefined){
+      land('b',Number(el.dataset.q),Number(el.dataset.r))
+    }else{
+      say('b','<i>Dropped outside the map.</i> Nothing claimed.')
+      log('b','drag cancelled','#FF3366')
+    }
+  })
+
+  // Option C — arm, then one tap.
+  document.getElementById('armC').addEventListener('click',()=>{
+    state.c.armed=true
+    document.getElementById('bannerC').innerHTML =
+      '<div class="banner"><span>⚑ Tap any tile to land your flag</span>'+
+      '<button class="act ghost" id="cancelC">Cancel</button></div>'
+    document.getElementById('cancelC').addEventListener('click',()=>{
+      state.c.armed=false;document.getElementById('bannerC').innerHTML=''
+      say('c','Cancelled.');log('c','cancelled','#FF3366')})
+    say('c','<b>Armed.</b> The map is waiting for one tap. It clears itself after.')
+  })
+
+  document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',String(x===t)))
+    document.querySelectorAll('.panel').forEach(pn=>
+      pn.dataset.active=String(pn.dataset.panel===t.dataset.tab))
+  }))
+  document.querySelectorAll('[data-reset]').forEach(b=>b.addEventListener('click',()=>{
+    const p=b.dataset.reset
+    state[p]={owners:fresh(),armed:false}
+    document.getElementById('log'+p.toUpperCase()).innerHTML=''
+    if(p==='c')document.getElementById('bannerC').innerHTML=''
+    say(p,'Reset.');draw(p)
+  }))
+
+  for(const p of ['a','b','c']) draw(p)
+})()
+</script>
+</body>
+</html>

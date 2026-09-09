@@ -10,6 +10,8 @@ export type PendingBrand = {
   title: string
   description: string
   logoUrl: string
+  /** Sampled from the logo so the preview renders in the buyer's own colour, not a placeholder. */
+  primaryColorHex: string
 }
 
 type GameState = {

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hex Wars — first empty tile asks, once</title>
+<style>
+  :root{--bg:#0B0E14;--grid:#1E2638;--edge:#2A364F;--cyan:#00F0FF;--green:#00FF87;
+        --coral:#FF3366;--purple:#7C3AED;--muted:rgba(255,255,255,.5);--line:rgba(255,255,255,.09)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:rgba(255,255,255,.92);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:20px 24px 10px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:18px}
+  .sub{color:var(--muted);font-size:13px;max-width:82ch}
+  main{padding:16px 24px 30px;display:flex;gap:20px;flex-wrap:wrap}
+  .stageWrap{flex:1 1 580px;min-width:320px}
+  .stage{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#0d111a}
+  svg{width:100%;height:auto;display:block}
+  aside{flex:0 1 320px;min-width:270px;display:flex;flex-direction:column;gap:12px}
+  .card{border:1px solid var(--line);border-radius:14px;background:rgba(15,18,26,.6);padding:13px 15px}
+  .card h2{margin:0 0 8px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .v{font-size:12.5px}.v div{padding:3px 0}
+  .v b{color:var(--green)} .v i{color:var(--coral);font-style:normal}
+  .bar{border-top:1px solid var(--line);background:rgba(10,13,20,.92);padding:11px 13px}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:140px;background:rgba(255,255,255,.06);border:1px solid var(--line);
+    border-radius:10px;padding:9px 11px;color:#fff;font:inherit;font-size:13px;outline:none}
+  input[type=text]:focus{border-color:var(--cyan)}
+  .pay{background:var(--green);color:#08131c;border:0;border-radius:10px;padding:9px 15px;
+       font:inherit;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.05em;cursor:pointer}
+  .pay[disabled]{background:rgba(255,255,255,.1);color:rgba(255,255,255,.3);cursor:not-allowed}
+  .tot{font-family:ui-monospace,monospace;font-weight:800;color:var(--green);font-size:16px;
+       min-width:78px;text-align:right}
+  .tileAsk{position:absolute;z-index:6;width:262px;border:1px solid var(--cyan);border-radius:13px;
+           background:rgba(10,13,20,.98);padding:12px 13px;box-shadow:0 16px 40px rgba(0,0,0,.65)}
+  .tileAsk:after{content:"";position:absolute;bottom:-8px;left:50%;margin-left:-7px;width:13px;height:13px;
+                 background:rgba(10,13,20,.98);border-right:1px solid var(--cyan);
+                 border-bottom:1px solid var(--cyan);transform:rotate(45deg)}
+  .tileAsk h4{margin:0 0 2px;font-size:13px}
+  .tileAsk p{margin:0 0 9px;color:var(--muted);font-size:11px}
+  .x{position:absolute;top:7px;right:9px;color:var(--muted);cursor:pointer;font-size:14px;line-height:1}
+  .x:hover{color:#fff}
+  .note{color:var(--muted);font-size:11.5px;margin-top:8px}
+  .legend{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
+  .sw{width:14px;height:14px;border-radius:4px;flex:none}
+  #log div{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:11.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Your proposal: the first empty tile asks — once</h1>
+  <p class="sub">
+    Empty tile → placeholder appears instantly <em>and</em> the question is pinned to that tile, one
+    time only. Occupied tile → today's behaviour: click visits their site, the red arrow takes it.
+    The ask never fires twice, and never fires on somebody else's ground.
+  </p>
+</header>
+
+<main>
+  <div class="stageWrap">
+    <div class="stage">
+      <svg viewBox="0 0 620 320" id="map"></svg>
+      <div id="ask"></div>
+      <div class="bar">
+        <div class="row">
+          <input type="text" id="bar" placeholder="click an empty tile to start…" />
+          <span class="tot" id="tot">—</span>
+          <button class="pay" disabled id="pay">Pay</button>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      Try in this order: click an <b>empty</b> tile (ask appears) → dismiss it with ✕ → click another
+      empty tile (<b>it does not come back</b>) → click a rival tile (visits) → click a red arrow (takes it).
+    </p>
+  </div>
+
+  <aside>
+    <div class="card"><h2>What happened</h2><div class="v" id="ro">Click an empty tile →</div></div>
+    <div class="card"><h2>Legend</h2>
+      <div class="legend"><span class="sw" style="background:#1E2638;border:1px solid #2A364F"></span> Empty — click to claim</div>
+      <div class="legend"><span class="sw" style="background:#38BDF8"></span> ORBIT — click visits their site</div>
+      <div class="legend"><span class="sw" style="background:#3A3550;border:1px dashed #00FF87"></span> Yours, unnamed</div>
+      <div class="legend"><span class="sw" style="background:#7C3AED"></span> Yours, branded</div>
+      <div class="legend"><span class="sw" style="background:#FF3366"></span> Attack arrow</div>
+    </div>
+    <div class="card"><h2>Log</h2><div id="log"></div>
+      <div style="margin-top:9px"><button class="pay" id="reset"
+        style="background:rgba(255,255,255,.08);color:#fff">Reset</button></div></div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const NS='http://www.w3.org/2000/svg', S=34
+  const px=(q,r)=>({x:310+S*1.5*q,y:160+S*Math.sqrt(3)*(q/2+r)})
+  const cor=i=>({x:S*Math.cos(Math.PI/3*i),y:S*Math.sin(Math.PI/3*i)})
+  const DIRS=[[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]]
+  const K=(q,r)=>`${q},${r}`
+  const COORDS=[];for(let q=-4;q<=4;q++)for(let r=-2;r<=2;r++)if(Math.abs(q+r)<=4)COORDS.push([q,r])
+  const RIVAL=new Set(['2,0','3,0','2,1','3,-1','-3,0','-3,1'])
+
+  // askShown is the whole point: once true it never flips back.
+  let st={brand:null, sel:new Set(), askShown:false, mine:new Set()}
+  const map=document.getElementById('map'), askEl=document.getElementById('ask')
+  const say=h=>document.getElementById('ro').innerHTML=h
+  const log=(m,c)=>{const d=document.createElement('div')
+    d.innerHTML=`<span style="color:${c}">●</span> ${m}`;document.getElementById('log').prepend(d)}
+  const price=n=>n*(n+1)/2*10
+
+  function draw(){
+    map.innerHTML=''
+    for(const [q,r] of COORDS){
+      const {x,y}=px(q,r), k=K(q,r)
+      const rival=RIVAL.has(k), sel=st.sel.has(k)
+      const pts=Array.from({length:6},(_,i)=>{const c=cor(i);return `${x+c.x},${y+c.y}`}).join(' ')
+      const poly=document.createElementNS(NS,'polygon')
+      poly.setAttribute('points',pts)
+      poly.setAttribute('fill', sel?(st.brand?'#7C3AED':'#3A3550'):rival?'#38BDF8':'#1E2638')
+      poly.setAttribute('fill-opacity', sel||rival?'.92':'1')
+      poly.setAttribute('stroke', sel?'#00FF87':rival?'rgba(255,255,255,.28)':'#2A364F')
+      poly.setAttribute('stroke-width', sel?'3.5':'2')
+      poly.setAttribute('stroke-dasharray', sel&&!st.brand?'6 4':'')
+      poly.setAttribute('style','cursor:pointer')
+      poly.addEventListener('click',()=>onTile(q,r,x,y,rival))
+      map.appendChild(poly)
+
+      const label = sel ? (st.brand||'YOUR LOGO') : rival ? 'ORBIT' : ''
+      if(label){
+        const t=document.createElementNS(NS,'text')
+        t.setAttribute('x',x);t.setAttribute('y',y+4);t.setAttribute('text-anchor','middle')
+        t.setAttribute('font-size',label==='YOUR LOGO'?'8':'9');t.setAttribute('font-weight','800')
+        t.setAttribute('fill', sel&&!st.brand?'rgba(255,255,255,.55)':'rgba(9,12,18,.85)')
+        t.setAttribute('pointer-events','none')
+        t.textContent=label.length>10?label.slice(0,9)+'…':label
+        map.appendChild(t)
+      }
+    }
+
+    // Arrows only on rival tiles bordering something of yours — unchanged from today.
+    for(const [q,r] of COORDS){
+      if(!RIVAL.has(K(q,r))) continue
+      const from=DIRS.map(([dq,dr])=>[q+dq,r+dr]).find(([a,b])=>st.sel.has(K(a,b)))
+      if(!from) continue
+      const a=px(from[0],from[1]), b=px(q,r)
+      const g=document.createElementNS(NS,'g')
+      g.setAttribute('transform',`translate(${(a.x+b.x)/2},${(a.y+b.y)/2}) rotate(${Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI})`)
+      g.setAttribute('style','cursor:pointer')
+      const hit=document.createElementNS(NS,'circle');hit.setAttribute('r',16)
+      hit.setAttribute('fill','transparent');g.appendChild(hit)
+      const disc=document.createElementNS(NS,'circle');disc.setAttribute('r',12)
+      disc.setAttribute('fill','rgba(9,12,18,.8)');disc.setAttribute('stroke','#FF3366')
+      disc.setAttribute('stroke-width','2');g.appendChild(disc)
+      const head=document.createElementNS(NS,'path')
+      head.setAttribute('d','M -6 -6 L 7 0 L -6 6 L -3 0 Z');head.setAttribute('fill','#FF3366')
+      g.appendChild(head)
+      g.addEventListener('click',e=>{e.stopPropagation()
+        st.sel.add(K(q,r));RIVAL.delete(K(q,r))
+        log(`took ${q},${r} from ORBIT · $15.00`,'#FF3366')
+        say('<b>Taken.</b> The arrow is the only way to take occupied ground — unchanged by any of this.')
+        draw()})
+      map.appendChild(g)
+    }
+
+    const n=st.sel.size
+    document.getElementById('tot').textContent=n?'$'+price(n).toFixed(2):'—'
+    const pay=document.getElementById('pay')
+    pay.disabled=!(n&&st.brand)
+    pay.textContent=n&&st.brand?'Pay $'+price(n).toFixed(2):'Pay'
+  }
+
+  function onTile(q,r,x,y,rival){
+    if(rival){
+      log('opened orbitcache.io','#00F0FF')
+      say('<b>Occupied tile → visits their site.</b> Exactly as today. No ask, no interruption — that click belongs to the advertiser.')
+      return
+    }
+    const k=K(q,r)
+    st.sel.has(k)?st.sel.delete(k):st.sel.add(k)
+    log(`selected ${k}`,'#00FF87')
+
+    if(!st.brand && !st.askShown && st.sel.size){
+      st.askShown=true          // fires once, for the life of the visit
+      showAsk(x,y)
+      say('<b>First empty tile.</b> The placeholder lands instantly AND the question is pinned to that tile. This fires once.')
+    } else if(!st.brand){
+      say('<b>No second ask.</b> The placeholder still shows what you are building — the claim bar carries the question from here.')
+    } else {
+      say(`<b>${st.sel.size} tile${st.sel.size===1?'':'s'}</b> previewing as <b>${st.brand}</b>.`)
+    }
+    draw()
+  }
+
+  function showAsk(x,y){
+    const box=map.getBoundingClientRect(), scale=box.width/620
+    askEl.innerHTML=
+      `<div class="tileAsk" style="left:${Math.min(Math.max(x*scale-131,8),box.width-270)}px;top:${Math.max(6,y*scale-116)}px">
+         <span class="x" id="closeAsk">✕</span>
+         <h4>Your logo goes here</h4><p>What's your website? We'll fetch the rest.</p>
+         <div class="row"><input type="text" id="askIn" placeholder="yourcompany.com" />
+         <button class="pay" id="askGo">Go</button></div></div>`
+    const inp=document.getElementById('askIn');inp.focus()
+    const commit=()=>{const v=inp.value.trim();if(!v)return
+      st.brand=v;document.getElementById('bar').value=v;askEl.innerHTML=''
+      log(`brand set: ${v}`,'#00FF87')
+      say(`<b>${v}</b> — dropped onto the tiles you already picked. Nothing you did was wasted.`);draw()}
+    document.getElementById('askGo').addEventListener('click',commit)
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')commit()})
+    document.getElementById('closeAsk').addEventListener('click',()=>{
+      askEl.innerHTML='';log('ask dismissed','#FF3366')
+      say('<b>Dismissed — and it will not come back.</b> The placeholder keeps showing what you are building, and the claim bar still takes your URL.')})
+  }
+
+  document.getElementById('bar').addEventListener('input',e=>{
+    st.brand=e.target.value.trim()||null;draw()
+    say(st.brand?`<b>${st.brand}</b> entered from the bar.`:'Back to the placeholder.')})
+
+  document.getElementById('reset').addEventListener('click',()=>location.reload())
+  draw()
+})()
+</script>
+</body>
+</html>

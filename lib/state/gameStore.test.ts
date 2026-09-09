@@ -219,6 +219,7 @@ describe('gameStore', () => {
         title: 'Acme',
         description: 'Things',
         logoUrl: 'https://acme.com/logo.png',
+        primaryColorHex: '#3B82F6',
       })
       store.applyEmpireUpsert(empire)
 

@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hex Wars — click-first, three more ways</title>
+<style>
+  :root{--bg:#0B0E14;--grid:#1E2638;--edge:#2A364F;--cyan:#00F0FF;--green:#00FF87;
+        --coral:#FF3366;--amber:#FBBF24;--purple:#7C3AED;--muted:rgba(255,255,255,.5);
+        --line:rgba(255,255,255,.09)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:rgba(255,255,255,.92);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:20px 24px 8px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:18px}
+  .sub{color:var(--muted);font-size:13px;max-width:80ch}
+  .tabs{display:flex;gap:8px;padding:14px 24px 0;flex-wrap:wrap}
+  .tab{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--muted);
+       border-radius:999px;padding:7px 15px;cursor:pointer;font:inherit;font-size:12.5px}
+  .tab[aria-selected="true"]{border-color:var(--cyan);color:var(--cyan);background:rgba(0,240,255,.1)}
+  main{padding:16px 24px 30px;display:flex;gap:20px;flex-wrap:wrap}
+  .stageWrap{flex:1 1 560px;min-width:320px}
+  .stage{position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#0d111a}
+  svg{width:100%;height:auto;display:block}
+  aside{flex:0 1 320px;min-width:270px;display:flex;flex-direction:column;gap:12px}
+  .card{border:1px solid var(--line);border-radius:14px;background:rgba(15,18,26,.6);padding:13px 15px}
+  .card h2{margin:0 0 8px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .v{font-size:12.5px}.v div{padding:3px 0}
+  .v b{color:var(--green)} .v i{color:var(--coral);font-style:normal}
+  .panel{display:none}.panel[data-active="true"]{display:block}
+  .bar{border-top:1px solid var(--line);background:rgba(10,13,20,.92);padding:11px 13px}
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  input[type=text]{flex:1;min-width:150px;background:rgba(255,255,255,.06);border:1px solid var(--line);
+    border-radius:10px;padding:9px 11px;color:#fff;font:inherit;font-size:13px;outline:none}
+  input[type=text]:focus{border-color:var(--cyan)}
+  .pay{background:var(--green);color:#08131c;border:0;border-radius:10px;padding:9px 15px;
+       font:inherit;font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.05em;cursor:pointer}
+  .pay[disabled]{background:rgba(255,255,255,.1);color:rgba(255,255,255,.3);cursor:not-allowed}
+  .pay.big{padding:12px 20px;font-size:13.5px;width:100%}
+  .tot{font-family:ui-monospace,monospace;font-weight:800;color:var(--green);font-size:16px;
+       min-width:78px;text-align:right}
+  .note{color:var(--muted);font-size:11.5px;margin-top:8px}
+
+  /* E — on-tile ask */
+  .tileAsk{position:absolute;z-index:6;width:250px;border:1px solid var(--cyan);border-radius:12px;
+           background:rgba(10,13,20,.97);padding:11px 12px;box-shadow:0 14px 36px rgba(0,0,0,.6)}
+  .tileAsk:after{content:"";position:absolute;bottom:-8px;left:50%;margin-left:-7px;width:13px;height:13px;
+                 background:rgba(10,13,20,.97);border-right:1px solid var(--cyan);
+                 border-bottom:1px solid var(--cyan);transform:rotate(45deg)}
+  .tileAsk h4{margin:0 0 8px;font-size:12.5px}
+
+  /* F — checkout sheet */
+  .sheet{position:absolute;inset:auto 0 0 0;z-index:6;border-top:1px solid var(--green);
+         background:rgba(10,13,20,.98);padding:15px 16px;transform:translateY(102%);
+         transition:transform .28s cubic-bezier(.16,1,.3,1)}
+  .sheet.up{transform:translateY(0)}
+  .sheet h4{margin:0 0 3px;font-size:15px}
+  .sheet p{margin:0 0 11px;color:var(--muted);font-size:12px}
+  .lines{font-family:ui-monospace,monospace;font-size:12px;margin-bottom:11px}
+  .lines div{display:flex;justify-content:space-between;padding:2px 0}
+  .lines .t{border-top:1px solid var(--line);margin-top:5px;padding-top:6px;font-weight:800;color:var(--green)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Click first — three more ways to ask “who are you?”</h1>
+  <p class="sub">
+    All three keep the map live from the first second. What differs is <em>when</em> and <em>where</em>
+    identity gets asked for, and what the very first click gives back. Click tiles in each and watch
+    what happens.
+  </p>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" data-tab="d" aria-selected="true">D · Placeholder billboard</button>
+  <button class="tab" role="tab" data-tab="e" aria-selected="false">E · Ask on the tile</button>
+  <button class="tab" role="tab" data-tab="f" aria-selected="false">F · Price first (checkout)</button>
+</div>
+
+<main>
+  <div class="stageWrap">
+    <section class="panel" data-panel="d" data-active="true">
+      <div class="stage">
+        <svg viewBox="0 0 620 300" id="svgD"></svg>
+        <div class="bar">
+          <div class="row">
+            <input type="text" id="barD" placeholder="Replace “YOUR LOGO” — type your site…" />
+            <span class="tot" id="totD">—</span>
+            <button class="pay" disabled id="payD">Pay</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">Click a tile: a placeholder billboard appears <em>instantly</em>. The first click is never dead.</p>
+    </section>
+
+    <section class="panel" data-panel="e">
+      <div class="stage">
+        <svg viewBox="0 0 620 300" id="svgE"></svg>
+        <div id="askE"></div>
+        <div class="bar">
+          <div class="row">
+            <input type="text" id="barE" placeholder="click a tile…" />
+            <span class="tot" id="totE">—</span>
+            <button class="pay" disabled id="payE">Pay</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">The question appears pinned to the tile you clicked — pointing at the space it will fill.</p>
+    </section>
+
+    <section class="panel" data-panel="f">
+      <div class="stage">
+        <svg viewBox="0 0 620 300" id="svgF"></svg>
+        <div class="sheet" id="sheetF">
+          <h4>Almost yours</h4>
+          <p>Last step — where should these tiles link to?</p>
+          <div class="lines" id="linesF"></div>
+          <div class="row">
+            <input type="text" id="inF" placeholder="yourcompany.com" />
+            <button class="pay" id="goF">Continue</button>
+          </div>
+        </div>
+        <div class="bar">
+          <div class="row">
+            <span style="flex:1;color:var(--muted);font-size:12.5px" id="hintF">Tap tiles to build your space</span>
+            <span class="tot" id="totF">—</span>
+            <button class="pay" disabled id="payF">Claim</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">No field at all until you commit. Clicking builds a basket; the price is the hook.</p>
+    </section>
+  </div>
+
+  <aside>
+    <div class="card"><h2>What happened</h2><div class="v" id="ro">Click a tile →</div></div>
+    <div class="card"><h2>Trade-offs</h2><div class="v" id="tr"></div></div>
+    <div class="card"><h2>Reset</h2>
+      <button class="pay" id="reset" style="background:rgba(255,255,255,.08);color:#fff">Reset all</button></div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const NS='http://www.w3.org/2000/svg', S=34
+  const RIVALS=[['ORBIT','#38BDF8'],['LATTICE','#FBBF24'],['VOLT','#F97316']]
+  const px=(q,r)=>({x:310+S*1.5*q,y:150+S*Math.sqrt(3)*(q/2+r)})
+  const cor=i=>({x:S*Math.cos(Math.PI/3*i),y:S*Math.sin(Math.PI/3*i)})
+  const COORDS=[];for(let q=-4;q<=4;q++)for(let r=-2;r<=2;r++)if(Math.abs(q+r)<=4)COORDS.push([q,r])
+  const K=(q,r)=>`${q},${r}`
+  const owner=i=>i%4===0?RIVALS[i%RIVALS.length]:null
+  const price=n=>n*(n+1)/2*10
+
+  const TR={
+    d:`<div><b>+</b> The first click is never dead — you see a
+          billboard immediately</div>
+       <div><b>+</b> Teaches the whole product in one click</div>
+       <div><b>+</b> “Replace YOUR LOGO” is a strong nudge</div>
+       <div><b>+</b> No panel, no interruption, no mode</div>
+       <div><i>−</i> Someone could mistake the placeholder for
+          a finished result</div>`,
+    e:`<div><b>+</b> Question is spatially tied to the answer —
+          it points at the space being bought</div>
+       <div><b>+</b> Impossible to miss, it is under your cursor</div>
+       <div><i>−</i> Floats over the map, so it covers tiles —
+          the exact problem we removed the hover card for</div>
+       <div><i>−</i> Awkward near screen edges and on phones</div>`,
+    f:`<div><b>+</b> The price is the hook, not the form</div>
+       <div><b>+</b> Feels like a normal checkout — familiar</div>
+       <div><b>+</b> Identity asked once, at the moment of paying</div>
+       <div><i>−</i> No brand preview at all until the very end,
+          so “how will it look?” goes unanswered longest</div>`,
+  }
+
+  const st={d:{brand:null,sel:new Set()},e:{brand:null,sel:new Set()},f:{brand:null,sel:new Set()}}
+  const say=h=>document.getElementById('ro').innerHTML=h
+
+  function draw(p){
+    const svg=document.getElementById('svg'+p.toUpperCase());svg.innerHTML=''
+    const s=st[p]
+    COORDS.forEach(([q,r],i)=>{
+      const {x,y}=px(q,r), own=owner(i), sel=s.sel.has(K(q,r))
+      const pts=Array.from({length:6},(_,k)=>{const c=cor(k);return `${x+c.x},${y+c.y}`}).join(' ')
+      const poly=document.createElementNS(NS,'polygon')
+      poly.setAttribute('points',pts)
+      // D shows a placeholder fill on selection even with no brand; E and F stay bare.
+      const showBrandFill = sel && (s.brand || p==='d')
+      poly.setAttribute('fill', showBrandFill ? (s.brand?'#7C3AED':'#3A3550') : own?own[1]:'#1E2638')
+      poly.setAttribute('fill-opacity', sel||own?'.92':'1')
+      poly.setAttribute('stroke', sel?'#00FF87':own?'rgba(255,255,255,.28)':'#2A364F')
+      poly.setAttribute('stroke-width', sel?'3.5':'2')
+      poly.setAttribute('stroke-dasharray', sel&&!s.brand?'6 4':'')
+      poly.setAttribute('style','cursor:pointer')
+      poly.addEventListener('click',()=>onTile(p,q,r,x,y))
+      svg.appendChild(poly)
+
+      let label = own?own[0]:''
+      if(sel) label = s.brand ? s.brand : (p==='d' ? 'YOUR LOGO' : '')
+      if(label){
+        const t=document.createElementNS(NS,'text')
+        t.setAttribute('x',x);t.setAttribute('y',y+4);t.setAttribute('text-anchor','middle')
+        t.setAttribute('font-size', label==='YOUR LOGO'?'8':'9')
+        t.setAttribute('font-weight','800')
+        t.setAttribute('fill', sel&&!s.brand?'rgba(255,255,255,.6)':'rgba(9,12,18,.85)')
+        t.setAttribute('pointer-events','none')
+        t.textContent=label.length>10?label.slice(0,9)+'…':label
+        svg.appendChild(t)
+      }
+    })
+
+    const n=s.sel.size, P=p.toUpperCase()
+    document.getElementById('tot'+P).textContent = n?'$'+price(n).toFixed(2):'—'
+    const pay=document.getElementById('pay'+P)
+    if(p==='f'){
+      pay.disabled=!n
+      pay.textContent = n?'Claim $'+price(n).toFixed(2):'Claim'
+      document.getElementById('hintF').textContent =
+        n?`${n} tile${n===1?'':'s'} — press Claim to finish`:'Tap tiles to build your space'
+    } else {
+      pay.disabled=!(n&&s.brand)
+      pay.textContent = n&&s.brand?'Pay $'+price(n).toFixed(2):'Pay'
+    }
+  }
+
+  function onTile(p,q,r,x,y){
+    const s=st[p], k=K(q,r)
+    s.sel.has(k)?s.sel.delete(k):s.sel.add(k)
+
+    if(p==='d'){
+      say(s.brand
+        ? `<b>${s.sel.size} tiles</b> previewing as <b>${s.brand}</b>.`
+        : `<b>Something happened immediately.</b> A “YOUR LOGO” placeholder is on the map — the click paid off before you gave anything.`)
+    }
+    if(p==='e'){
+      if(!s.brand && s.sel.size) showAskE(x,y)
+      else document.getElementById('askE').innerHTML=''
+      say(s.brand?`<b>${s.sel.size} tiles</b> as <b>${s.brand}</b>.`
+                 :'<b>The ask is pinned to the tile</b> — pointing at the space it will fill.')
+    }
+    if(p==='f'){
+      document.getElementById('sheetF').classList.remove('up')
+      say(`<b>${s.sel.size} tile${s.sel.size===1?'':'s'} · $${price(s.sel.size).toFixed(2)}</b> — no form yet. The price does the persuading.`)
+    }
+    draw(p)
+  }
+
+  function showAskE(x,y){
+    const stage=document.getElementById('svgE').getBoundingClientRect()
+    const scale=stage.width/620
+    document.getElementById('askE').innerHTML =
+      `<div class="tileAsk" style="left:${Math.min(Math.max(x*scale-125,8),stage.width-258)}px;top:${y*scale-108}px">
+         <h4>Your logo goes here — what’s your site?</h4>
+         <div class="row"><input type="text" id="inE" placeholder="yourcompany.com" />
+         <button class="pay" id="goE">Go</button></div></div>`
+    const inp=document.getElementById('inE');inp.focus()
+    const commit=()=>{const v=inp.value.trim();if(!v)return
+      st.e.brand=v;document.getElementById('barE').value=v
+      document.getElementById('askE').innerHTML=''
+      say(`<b>${v}</b> — dropped straight onto the tiles you already picked.`);draw('e')}
+    document.getElementById('goE').addEventListener('click',commit)
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')commit()})
+  }
+
+  document.getElementById('barD').addEventListener('input',e=>{
+    st.d.brand=e.target.value.trim()||null
+    say(st.d.brand?`Placeholder replaced by <b>${st.d.brand}</b> — the tiles were already yours to fill.`
+                  :'Back to the placeholder.')
+    draw('d')})
+
+  document.getElementById('payF').addEventListener('click',()=>{
+    const n=st.f.sel.size;if(!n)return
+    document.getElementById('linesF').innerHTML =
+      `<div><span>${n} tile${n===1?'':'s'}</span><span>$${price(n).toFixed(2)}</span></div>
+       <div class="t"><span>Total</span><span>$${price(n).toFixed(2)}</span></div>`
+    document.getElementById('sheetF').classList.add('up')
+    document.getElementById('inF').focus()
+    say('<b>Checkout sheet.</b> Identity is asked once, at the moment of paying — like any store.')
+  })
+  document.getElementById('goF').addEventListener('click',()=>{
+    const v=document.getElementById('inF').value.trim();if(!v)return
+    st.f.brand=v;document.getElementById('sheetF').classList.remove('up')
+    say(`<b>${v}</b> — only now does the map show what you bought. That is the trade this option makes.`)
+    draw('f')})
+
+  document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected',String(x===t)))
+    document.querySelectorAll('.panel').forEach(pn=>pn.dataset.active=String(pn.dataset.panel===t.dataset.tab))
+    document.getElementById('tr').innerHTML=TR[t.dataset.tab];say('Click a tile →')}))
+  document.getElementById('reset').addEventListener('click',()=>location.reload())
+
+  document.getElementById('tr').innerHTML=TR.d
+  ;['d','e','f'].forEach(draw)
+})()
+</script>
+</body>
+</html>

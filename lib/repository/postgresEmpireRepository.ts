@@ -1,5 +1,6 @@
 import { getDatabase, type Database } from '@/lib/db/client'
 import type { EmpireRepository } from './empireRepository'
+import { DEFAULT_BRAND_COLOR } from '@/lib/brand/dominantColor'
 import type { Empire } from '@/types/game'
 import type { ResolvedBrandMetadata } from '@/lib/brand/resolveBrandMetadata'
 
@@ -72,7 +73,7 @@ export function createPostgresEmpireRepository(db: Database = getDatabase()): Em
       return rows.map(rowToEmpire)
     },
 
-    async getOrCreateForUrl(url, metadata) {
+    async getOrCreateForUrl(url, metadata, primaryColorHex) {
       const hostname = safeHostname(url)
       if (!hostname) throw new Error(`Cannot derive an empire from URL: ${url}`)
 
@@ -80,17 +81,22 @@ export function createPostgresEmpireRepository(db: Database = getDatabase()): Em
       // the same new domain at once would both see "not found" and both insert, and one would fail
       // on the primary key; upserting makes the race a no-op instead of an error.
       //
-      // Existing empires keep their branding: DO UPDATE only refreshes the scraped fields, which
-      // is what a returning buyer expects when their site's metadata has changed since they first
-      // claimed territory.
+      // A returning buyer's branding is refreshed only with information that is REAL:
+      //
+      //  - Colour updates only when one was actually sampled ($9). No colour means "keep what you
+      //    have" — updating unconditionally repainted an entire territory the palette purple
+      //    whenever a later expansion could not read the logo.
+      //  - Logo and wording update only when the site was actually read ($10 false). Hostname
+      //    placeholders from a blocked or failed scrape never replace a real logo and description.
       const { rows } = await db.query<EmpireRow>(
-        `INSERT INTO empires (id, domain, url, name, logo_url, og_title, og_description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO empires (id, domain, url, name, logo_url, og_title, og_description, primary_color_hex)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            url = EXCLUDED.url,
-           logo_url = EXCLUDED.logo_url,
-           og_title = EXCLUDED.og_title,
-           og_description = EXCLUDED.og_description
+           logo_url = CASE WHEN $10::boolean THEN empires.logo_url ELSE EXCLUDED.logo_url END,
+           og_title = CASE WHEN $10::boolean THEN empires.og_title ELSE EXCLUDED.og_title END,
+           og_description = CASE WHEN $10::boolean THEN empires.og_description ELSE EXCLUDED.og_description END,
+           primary_color_hex = COALESCE($9::text, empires.primary_color_hex)
          RETURNING ${EMPIRE_COLUMNS}`,
         [
           hostname,
@@ -100,6 +106,11 @@ export function createPostgresEmpireRepository(db: Database = getDatabase()): Em
           metadata.logoUrl,
           metadata.title,
           metadata.description,
+          // Validated by the caller AND by the schema's own CHECK constraint — this value
+          // originates on a client, so neither guard is redundant.
+          primaryColorHex ?? DEFAULT_BRAND_COLOR,
+          primaryColorHex ?? null,
+          Boolean(metadata.isFallback),
         ],
       )
 

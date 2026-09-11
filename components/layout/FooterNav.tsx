@@ -15,6 +15,10 @@ export function FooterNav() {
       <Link href="/privacy" target="_blank" className="hover:text-hexwars-cyan hover:underline">
         Privacy
       </Link>
+      <span aria-hidden="true">·</span>
+      <Link href="/refund-policy" target="_blank" className="hover:text-hexwars-cyan hover:underline">
+        Refunds
+      </Link>
     </nav>
   )
 }

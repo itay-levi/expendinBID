@@ -1,7 +1,7 @@
 import { getDatabase, type Database, type SqlTransaction } from '@/lib/db/client'
 import { coordFromHexId, hexIdFor, unownedHexAt } from '@/lib/hex/hexIdentity'
 import { hexNeighbors, type AxialCoord } from '@/lib/hex/hexMath'
-import type { HexRepository } from './hexRepository'
+import { batchConflictReason, type HexRepository, type TakeoverBatchItem, type TakeoverBatchResult } from './hexRepository'
 import type { HexTile } from '@/types/game'
 
 /**
@@ -12,6 +12,11 @@ import type { HexTile } from '@/types/game'
  * to load every hex ever sold into memory.
  */
 const MAX_HEXES_PER_MAP_READ = 5_000
+
+/** Thrown inside a settlement transaction to roll every write back. Never escapes the repository. */
+class SettlementConflict extends Error {}
+
+type LockedTile = { item: TakeoverBatchItem; coord: AxialCoord; existed: boolean; current: HexTile }
 
 type HexRow = {
   q: number
@@ -129,6 +134,90 @@ export function createPostgresHexRepository(db: Database = getDatabase()): HexRe
          VALUES ($1, $2, $3, $4, $5)`,
         [entry.coord.q, entry.coord.r, entry.attackerEmpireId, entry.defenderEmpireId, entry.pricePaidCents],
       )
+    },
+
+    async applyTakeoverBatch(items, now = new Date()): Promise<TakeoverBatchResult> {
+      if (new Set(items.map((item) => item.hexId)).size !== items.length) {
+        return { applied: false, conflicts: ['Duplicate hex in settlement'] }
+      }
+      const located: Array<{ item: TakeoverBatchItem; coord: AxialCoord }> = []
+      for (const item of items) {
+        const coord = coordFromHexId(item.hexId)
+        if (!coord) return { applied: false, conflicts: [`Malformed hex id: ${item.hexId}`] }
+        located.push({ item, coord })
+      }
+      // One global lock order, so two overlapping settlements can never each hold a lock the other
+      // is waiting on — the deadlock you get when every transaction locks in its own basket order.
+      const lockOrder = [...located].sort((a, b) => a.coord.q - b.coord.q || a.coord.r - b.coord.r)
+
+      try {
+        return await db.transaction(async (tx): Promise<TakeoverBatchResult> => {
+          const locked: LockedTile[] = []
+          for (const { item, coord } of lockOrder) {
+            const current = await lockHexForUpdate(tx, coord)
+            locked.push({ item, coord, current, existed: current.ownerId !== null })
+          }
+
+          // The comparison that makes settlement safe, done while every row is held.
+          const conflicts = locked
+            .map(({ item, current }) => batchConflictReason(current, item, now))
+            .filter((reason): reason is string => reason !== null)
+          if (conflicts.length > 0) return { applied: false, conflicts }
+
+          const ownedSince = now.toISOString()
+          const written = new Map<string, { hex: HexTile; previousOwner: string | null }>()
+          for (const { item, coord, existed, current } of locked) {
+            const params = [coord.q, coord.r, item.ownerId, current.isCapital, item.pricePaidCents, false, ownedSince, item.lockedUntil]
+            if (existed) {
+              await tx.query(
+                `UPDATE hexes SET owner_id = $3, is_capital = $4, last_price_paid_cents = $5, is_contested = $6,
+                        owned_since = $7, locked_until = $8
+                  WHERE q = $1 AND r = $2`,
+                params,
+              )
+            } else {
+              const { rows } = await tx.query(
+                `INSERT INTO hexes (q, r, owner_id, is_capital, last_price_paid_cents, is_contested, owned_since, locked_until)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT (q, r) DO NOTHING
+                 RETURNING q`,
+                params,
+              )
+              // Open ground has no row to lock, so a concurrent first claim only shows up here: the
+              // other buyer's insert won, and this entire settlement has to roll back.
+              if (rows.length === 0) throw new SettlementConflict(`${item.hexId} changed hands before payment settled`)
+            }
+            await tx.query(
+              `INSERT INTO takeover_events (hex_q, hex_r, attacker_empire_id, defender_empire_id, price_paid_cents)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [coord.q, coord.r, item.ownerId, current.ownerId, item.pricePaidCents],
+            )
+            written.set(item.hexId, {
+              previousOwner: current.ownerId,
+              hex: {
+                ...current,
+                id: hexIdFor(coord),
+                coord,
+                ownerId: item.ownerId,
+                lastPricePaidCents: item.pricePaidCents,
+                isContested: false,
+                ownedSince,
+                lockedUntil: item.lockedUntil,
+              },
+            })
+          }
+
+          // Back in the caller's order, not lock order.
+          return {
+            applied: true,
+            hexes: items.map((item) => written.get(item.hexId)!.hex),
+            previousOwners: items.map((item) => written.get(item.hexId)!.previousOwner),
+          }
+        })
+      } catch (error: unknown) {
+        if (error instanceof SettlementConflict) return { applied: false, conflicts: [error.message] }
+        throw error
+      }
     },
 
     async applyTakeover(hexId, updates) {

@@ -14,6 +14,12 @@ export const PENDING_SELECTION_EMPIRE_ID = '__pending_selection__'
 export type SelectionContext = {
   /** Coordinate keys already in the basket. */
   selectedKeys: ReadonlySet<string>
+  /**
+   * Who owns the target right now, or null for open ground. Required rather than derived: the
+   * server backs `getOwnerAt` with a neighbours-only index that excludes the target, so deriving
+   * it would silently report every takeover target as unowned.
+   */
+  targetOwnerId: string | null
 }
 
 /**
@@ -44,6 +50,7 @@ export function checkSelectionEligibility(
     targetCoord,
     (coord) => (context.selectedKeys.has(axialKey(coord)) ? effectiveEmpireId : getOwnerAt(coord)),
     effectiveEmpireId,
+    context.targetOwnerId,
   )
 }
 

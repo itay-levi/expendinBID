@@ -77,7 +77,7 @@ export function BottomDashboard({ hallOfFameEntries, onConquer }: BottomDashboar
         hex.coord,
         (coord) => selectOwnerAt({ ownedHexes }, coord),
         myEmpireId,
-        { selectedKeys: others },
+        { selectedKeys: others, targetOwnerId: hex.ownerId },
       ).eligible
     })
     if (unreachable.length === 0) return null
@@ -120,7 +120,10 @@ export function BottomDashboard({ hallOfFameEntries, onConquer }: BottomDashboar
         <div className="pointer-events-auto h-[38svh] w-full max-w-3xl sm:h-56">{ActivePanel}</div>
       )}
 
-      <div className="pointer-events-auto flex w-full max-w-3xl flex-col gap-2">
+      {/* Inert itself: only the tab buttons and the claim bar take clicks. On a phone this column is
+          the full viewport width, and when it captured pointer events the empty space either side
+          of the centred tabs was a strip of map that could never be tapped. */}
+      <div className="pointer-events-none flex w-full max-w-3xl flex-col gap-2">
         <div className="flex flex-wrap justify-center gap-1.5">
           {PANEL_TABS.map(({ key, label, icon: Icon }) => {
             const isOpen = openPanel === key
@@ -130,7 +133,7 @@ export function BottomDashboard({ hallOfFameEntries, onConquer }: BottomDashboar
                 type="button"
                 onClick={() => setOpenPanel(isOpen ? null : key)}
                 aria-expanded={isOpen}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur-hud transition-colors ${
+                className={`pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur-hud transition-colors ${
                   isOpen
                     ? 'border-hexwars-cyan/40 bg-hexwars-cyan/10 text-hexwars-cyan'
                     : 'border-glass-border bg-glass text-white/55 hover:text-white/80'

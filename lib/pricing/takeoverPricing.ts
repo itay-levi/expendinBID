@@ -157,3 +157,42 @@ export function priceForSelection(
 export function nextTileCostCents(currentCount: number): number {
   return BASE_HEX_PRICE_CENTS * (currentCount + 1)
 }
+
+export type BasketQuote = {
+  /** What the territory itself costs — escalation and spread premium included. */
+  territoryCents: number
+  protectionCents: number
+  totalCents: number
+}
+
+/**
+ * Everything a basket costs, split the way checkout charges it.
+ *
+ * The one place the charge is computed. Checkout prices the session with it, settlement splits the
+ * territory portion across the tiles with it, and the payment webhook checks the amount actually
+ * paid against it — three callers that previously each did their own arithmetic, one of them with a
+ * superseded formula that recorded a $100 purchase as $36.
+ */
+export function quoteForHexes(
+  hexes: ReadonlyArray<{ ownerId: string | null; lastPricePaidCents: number }>,
+  billboardCount: number,
+  protect: boolean,
+): BasketQuote {
+  const territoryCents = priceForSelection(hexes, billboardCount).totalCents
+  const protectionCents = protect ? PROTECTION_FEE_CENTS * hexes.length : 0
+  return { territoryCents, protectionCents, totalCents: territoryCents + protectionCents }
+}
+
+/**
+ * Splits a total into `parts` whole-cent shares that sum to it exactly.
+ *
+ * Used to record what each tile of a purchase cost. An even split, because that is what the buyer
+ * paid for the block as a whole; rounding each share independently would lose or invent cents, and
+ * the ledger these feed is where every revenue figure on the site comes from.
+ */
+export function splitEvenly(totalCents: number, parts: number): number[] {
+  if (parts <= 0) return []
+  const base = Math.floor(totalCents / parts)
+  const remainder = totalCents - base * parts
+  return Array.from({ length: parts }, (_, index) => base + (index < remainder ? 1 : 0))
+}

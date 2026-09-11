@@ -1,4 +1,4 @@
-import { checkHostIsSafeToFetch } from '@/lib/security/ssrfGuard'
+import { guardedFetch } from '@/lib/security/guardedFetch'
 import { rateLimit, clientKeyFromRequest, tooManyRequests } from '@/lib/security/rateLimit'
 
 // Node runtime: the SSRF guard uses node:dns/node:net, which the Edge runtime lacks.
@@ -53,7 +53,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const image = await fetchImageWithGuards(target.toString(), MAX_REDIRECTS)
+    const image = await fetchImageWithGuards(target.toString())
     // Copied into a plain ArrayBuffer: a Uint8Array view isn't a valid BodyInit on its own.
     const body = image.body.buffer.slice(
       image.body.byteOffset,
@@ -84,67 +84,21 @@ function jsonError(error: string, status: number): Response {
   })
 }
 
-async function fetchImageWithGuards(
-  targetUrl: string,
-  redirectsLeft: number,
-): Promise<{ body: Uint8Array; contentType: string }> {
-  const parsed = new URL(targetUrl)
-
-  // Re-checked on every hop, immediately before the fetch — a redirect chain is exactly how a
-  // "validate once, then follow redirects automatically" implementation gets walked into a
-  // private address (ARCHITECTURE.md §15).
-  const hostCheck = await checkHostIsSafeToFetch(parsed.hostname)
-  if (!hostCheck.safe) throw new Error(hostCheck.reason)
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(targetUrl, {
-      signal: controller.signal,
-      redirect: 'manual',
-      headers: { 'User-Agent': 'HexWarsBrandBot/1.0 (+https://hexwars.example/bot)' },
-    })
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location')
-      if (!location) throw new Error('Redirect with no location')
-      if (redirectsLeft <= 0) throw new Error('Too many redirects')
-      return fetchImageWithGuards(new URL(location, targetUrl).toString(), redirectsLeft - 1)
-    }
-
-    if (!response.ok) throw new Error(`Logo host responded with ${response.status}`)
-
-    const contentType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
-    if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
-      throw new Error(`Unsupported logo content type: ${contentType || 'unknown'}`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('Empty response')
-
-    const chunks: Uint8Array[] = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      received += value.byteLength
-      if (received > MAX_IMAGE_BYTES) {
-        await reader.cancel()
-        throw new Error('Logo image too large')
-      }
-      chunks.push(value)
-    }
-
-    const body = new Uint8Array(received)
-    let offset = 0
-    for (const chunk of chunks) {
-      body.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-
-    return { body, contentType }
-  } finally {
-    clearTimeout(timeout)
+/**
+ * Downloads the image through the connect-time SSRF guard (lib/security/guardedFetch.ts): the
+ * address is validated inside the socket's own DNS lookup, every redirect hop is re-checked, and
+ * the body is capped. Only image types a browser can decode into a texture are accepted.
+ */
+async function fetchImageWithGuards(targetUrl: string): Promise<{ body: Uint8Array; contentType: string }> {
+  const response = await guardedFetch(targetUrl, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_IMAGE_BYTES,
+    maxRedirects: MAX_REDIRECTS,
+    accept: 'image/avif,image/webp,image/png,image/*;q=0.8',
+  })
+  if (!response.ok) throw new Error(`Logo host responded with ${response.status}`)
+  if (!ALLOWED_CONTENT_TYPES.has(response.contentType)) {
+    throw new Error(`Unsupported logo content type: ${response.contentType || 'unknown'}`)
   }
+  return { body: response.body, contentType: response.contentType }
 }

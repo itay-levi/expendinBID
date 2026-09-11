@@ -48,11 +48,15 @@ export function ClaimBar({
   onClearSelection,
   onClaim,
 }: ClaimBarProps) {
-  const [urlInput, setUrlInput] = useState('')
+  // Held in the store, not locally: the card pinned to the first claimed tile writes the same
+  // field, and answering there has to fill this input or the buyer appears to have typed nothing.
+  const urlInput = useGameStore((s) => s.claimUrlInput)
+  const setUrlInput = useGameStore((s) => s.setClaimUrlInput)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const setPendingBrand = useGameStore((s) => s.setPendingBrand)
+  const dismissBrandAsk = useGameStore((s) => s.dismissBrandAsk)
 
   const preview = useBrandPreview(urlInput)
   const brand = preview.status === 'ready' ? preview.brand : null
@@ -61,7 +65,10 @@ export function ClaimBar({
   // land on the map is the confirmation that the address was understood.
   useEffect(() => {
     setPendingBrand(brand)
-  }, [brand, setPendingBrand])
+    // Typing into the bar answers the on-tile question just as well as answering it there, so it
+    // must not reappear afterwards.
+    if (brand) dismissBrandAsk()
+  }, [brand, setPendingBrand, dismissBrandAsk])
 
   const hasBrand = brand !== null
   const hasTiles = selectedCount > 0
@@ -212,11 +219,15 @@ export function ClaimBar({
               ? 'Opening checkout…'
               : totalCents !== null && canSubmit
                 ? `Pay ${formatCents(totalCents)}`
-                : !hasBrand
+                : // The earliest unmet step wins, in the order the bar numbers them. An unreachable
+                  // tile comes after both, and before terms, which it used to be mislabelled as.
+                  !hasBrand
                   ? 'Enter your site'
                   : !hasTiles
                     ? 'Pick tiles'
-                    : 'Accept terms'}
+                    : blockedReason
+                      ? 'Fix selection'
+                      : 'Accept terms'}
           </button>
         </div>
       </div>
@@ -249,7 +260,11 @@ export function ClaimBar({
             <Link href="/terms" target="_blank" className="text-hexwars-cyan underline hover:no-underline">
               Terms
             </Link>{' '}
-            &amp; no-refund policy, and want instant delivery.
+            &amp;{' '}
+            <Link href="/refund-policy" target="_blank" className="text-hexwars-cyan underline hover:no-underline">
+              no-refund policy
+            </Link>
+            , and want instant delivery.
           </span>
         </label>
 

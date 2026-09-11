@@ -9,11 +9,17 @@ import {
   createPostgresLedgerRepository,
   type LedgerRepository,
 } from './ledgerRepository'
+import {
+  createInMemoryPaymentAuditRepository,
+  createPostgresPaymentAuditRepository,
+  type PaymentAuditRepository,
+} from './paymentAuditRepository'
 
 export type Repositories = {
   hexes: HexRepository
   empires: EmpireRepository
   ledger: LedgerRepository
+  audit: PaymentAuditRepository
 }
 
 /**
@@ -23,11 +29,15 @@ export type Repositories = {
  * is per-process, so it silently breaks the moment there is more than one instance, and it has no
  * row locking, so concurrent takeovers race. Off by default for exactly those reasons.
  */
-function useInMemory(): boolean {
+function isInMemoryMode(): boolean {
   return process.env.USE_IN_MEMORY_REPOSITORIES === '1'
 }
 
 let cached: Repositories | null = null
+// Created once per process. A fresh instance per call meant every request saw an empty idempotency
+// set and an empty blocklist, so neither did anything in this mode.
+const inMemoryLedger = createInMemoryLedgerRepository()
+const inMemoryAudit = createInMemoryPaymentAuditRepository()
 
 /**
  * The application's data access, with the database guaranteed migrated and seeded first.
@@ -38,11 +48,12 @@ let cached: Repositories | null = null
  * forgetting it in one handler is the kind of omission that only shows up on a cold deploy.
  */
 export async function getRepositories(): Promise<Repositories> {
-  if (useInMemory()) {
+  if (isInMemoryMode()) {
     return {
       hexes: inMemoryHexRepository,
       empires: inMemoryEmpireRepository,
-      ledger: createInMemoryLedgerRepository(),
+      ledger: inMemoryLedger,
+      audit: inMemoryAudit,
     }
   }
 
@@ -54,6 +65,7 @@ export async function getRepositories(): Promise<Repositories> {
       hexes: createPostgresHexRepository(db),
       empires: createPostgresEmpireRepository(db),
       ledger: createPostgresLedgerRepository(db),
+      audit: createPostgresPaymentAuditRepository(db),
     }
   }
   return cached

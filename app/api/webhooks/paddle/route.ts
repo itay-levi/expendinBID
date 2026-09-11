@@ -1,17 +1,14 @@
 import { NextResponse } from 'next/server'
 import { verifyPaddleWebhook } from '@/lib/webhooks/verifyPaddleWebhook'
 import { getRepositories } from '@/lib/repository'
-import { broadcaster } from '@/lib/realtime/broadcaster'
-import { notifyDefenderOfTakeover } from '@/lib/notifications/retaliationNotifier'
-import { resolveBrandMetadata } from '@/lib/brand/resolveBrandMetadata'
-import { requiredPriceForHex, priceForBulkCluster, PROTECTION_DURATION_MS } from '@/lib/pricing/takeoverPricing'
-import {
-  buildOwnerLookup,
-  verifyTakeoverStillValid,
-  type HexFingerprint,
-} from '@/lib/hex/takeoverGuard'
+import { resolveBrandMetadataOrFallback } from '@/lib/brand/resolveBrandMetadata'
+import { parseFingerprints } from '@/lib/hex/takeoverGuard'
+import { settleTakeover } from '@/lib/payments/settleTakeover'
+import { BodyTooLargeError, readBodyWithLimit } from '@/lib/http/readBodyWithLimit'
 import { logger } from '@/lib/logger'
-import type { Empire, HexTile } from '@/types/game'
+
+/** Paddle events are a few kilobytes; anything near this is not one of them. */
+const MAX_WEBHOOK_BYTES = 256 * 1024
 
 // This is the ONLY place hex ownership actually changes for a paid takeover — never on the
 // client's say-so. Everything here hinges on the signature check below being correct: skipping
@@ -24,34 +21,31 @@ import type { Empire, HexTile } from '@/types/game'
 type PaddleWebhookEvent = {
   event_type: string
   data: {
+    /** The transaction id, recorded so a later dispute can be traced to the buyer. */
+    id?: string
+    currency_code?: string
+    /** Paddle reports money as strings of minor units (cents for USD). */
+    details?: { totals?: { total?: string; grand_total?: string } }
     custom_data?: {
       hexIds?: string[]
       targetUrl?: string
       protect?: boolean | string
       expectedHexState?: string
+      primaryColorHex?: string
+      quotedTotalCents?: number | string
     }
   }
 }
 
-function isTakeoverMetadata(
-  metadata: PaddleWebhookEvent['data']['custom_data'],
-): metadata is { hexIds: string[]; targetUrl: string; protect?: boolean | string; expectedHexState?: string } {
-  return Boolean(metadata && Array.isArray(metadata.hexIds) && typeof metadata.targetUrl === 'string')
+type TakeoverMetadata = NonNullable<PaddleWebhookEvent['data']['custom_data']> & {
+  hexIds: string[]
+  targetUrl: string
 }
 
-function parseExpectedState(raw: string | undefined): Map<string, HexFingerprint> {
-  if (!raw) return new Map()
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return new Map()
-    return new Map(
-      parsed
-        .filter((f): f is HexFingerprint => Boolean(f) && typeof (f as HexFingerprint).hexId === 'string')
-        .map((f) => [f.hexId, f]),
-    )
-  } catch {
-    return new Map()
-  }
+function isTakeoverMetadata(
+  metadata: PaddleWebhookEvent['data']['custom_data'],
+): metadata is TakeoverMetadata {
+  return Boolean(metadata && Array.isArray(metadata.hexIds) && typeof metadata.targetUrl === 'string')
 }
 
 /**
@@ -82,7 +76,13 @@ export async function POST(request: Request): Promise<Response> {
 
   // Signature verification needs the exact raw body string — read as text, not json(), and
   // parse that same string afterward rather than letting the framework parse it first.
-  const rawBody = await request.text()
+  let rawBody: string
+  try {
+    rawBody = await readBodyWithLimit(request, MAX_WEBHOOK_BYTES)
+  } catch (error: unknown) {
+    if (error instanceof BodyTooLargeError) return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+    throw error
+  }
   const verification = verifyPaddleWebhook(rawBody, request.headers.get('paddle-signature'), secret)
 
   if (!verification.valid) {
@@ -111,109 +111,104 @@ export async function POST(request: Request): Promise<Response> {
   const { hexIds, targetUrl } = event.data.custom_data
   const protect = event.data.custom_data.protect === true || event.data.custom_data.protect === 'true'
 
-  const { hexes: hexRepository, empires: empireRepository, ledger } = await getRepositories()
+  // Anti-fraud, mirroring the Dodo webhook: the amount Paddle actually collected must cover what
+  // checkout quoted, in the quoted currency. A discount code or a partial collection must never
+  // deliver territory for less than it costs. `grand_total` is after credits, `total` before them.
+  const quotedCents = Number(event.data.custom_data.quotedTotalCents)
+  const totals = event.data.details?.totals
+  const paidCents = Number(totals?.grand_total ?? totals?.total)
+  const currency = (event.data.currency_code ?? '').toUpperCase()
+  const expectedCurrency = (process.env.PADDLE_CURRENCY_CODE ?? 'USD').toUpperCase()
+  if (
+    !Number.isInteger(quotedCents) ||
+    quotedCents <= 0 ||
+    !Number.isFinite(paidCents) ||
+    paidCents < quotedCents ||
+    currency !== expectedCurrency
+  ) {
+    logger.error('Paddle payment does not cover the quote — territory NOT applied', {
+      transactionId: event.data.id ?? null,
+      paidCents,
+      quotedCents,
+      currency,
+    })
+    // 200: a retry cannot change what was paid, so Paddle should stop redelivering.
+    return NextResponse.json({ received: true, applied: false, reason: 'amount_mismatch' })
+  }
+
+  const repositories = await getRepositories()
 
   // Idempotency. Paddle retries on any non-2xx, so a delivery that succeeded but timed out on our
-  // side WILL arrive again — and applying a takeover twice would charge once and escalate the hex
-  // price twice. The claim is a unique-constraint INSERT, not a prior "have I seen this?" read,
-  // because two concurrent retries would both pass a read-then-write check.
+  // side WILL arrive again. The claim is a unique-constraint INSERT, not a prior "have I seen this?"
+  // read, because two concurrent retries would both pass a read-then-write check.
   const webhookId = request.headers.get('paddle-event-id') ?? extractEventId(rawBody)
   if (webhookId) {
-    const claimed = await ledger.claimWebhookEvent(webhookId)
+    const claimed = await repositories.ledger.claimWebhookEvent(webhookId)
     if (!claimed) {
       logger.info('ignoring duplicate webhook delivery', { webhookId })
       return NextResponse.json({ received: true, duplicate: true })
     }
   } else {
     // No id to deduplicate on: proceed, but say so — this is the one path where a retry could
-    // double-apply, and it should be visible rather than silent.
+    // double-apply, and it should be visible rather than silent. (Settlement's compare-and-swap
+    // still refuses a second application of the same purchase.)
     logger.warn('webhook has no event id — cannot deduplicate this delivery')
   }
 
   try {
-    // Re-resolve metadata here too rather than trusting whatever the checkout step embedded —
-    // by the time a webhook fires (seconds to minutes later), it's cheap insurance against a
-    // tampered or stale metadata payload actually changing map state.
-    const metadata = await resolveBrandMetadata(targetUrl)
-    const attacker = await empireRepository.getOrCreateForUrl(targetUrl, metadata)
+    // Same settlement path as Dodo and demo claims — see lib/payments/settleTakeover.ts. It
+    // re-validates everything checkout assumed, under the row locks, and records the price that
+    // was actually charged. A site that blocks scrapers falls back to its hostname rather than
+    // failing every retry of a paid delivery.
+    const result = await settleTakeover(repositories, {
+      hexIds,
+      targetUrl,
+      metadata: await resolveBrandMetadataOrFallback(targetUrl),
+      primaryColorHex: event.data.custom_data.primaryColorHex,
+      protect,
+      expected: parseFingerprints(event.data.custom_data.expectedHexState),
+    })
 
-    const hexes = await Promise.all(hexIds.map((id) => hexRepository.getHexById(id)))
-    const missingIndex = hexes.findIndex((h) => h === null)
-    if (missingIndex !== -1) {
-      logger.error('payment.succeeded referenced an unknown hex', { hexId: hexIds[missingIndex] })
-      return NextResponse.json({ error: 'Unknown hex in payment metadata' }, { status: 422 })
-    }
-    const foundHexes = hexes as HexTile[]
-
-    // Re-validate everything the checkout step assumed. A payment can settle minutes after the
-    // session was created, and in that window the hex can be taken by a faster payment, escalate
-    // in price, or become protected. Applying blindly here is what would let a second buyer pay a
-    // stale price and still win the tile.
-    const expectedByHexId = parseExpectedState(event.data.custom_data.expectedHexState)
-    // Neighbours of the purchased hexes only — never the whole map. See the same note in
-    // app/api/checkout/create-session/route.ts.
-    const ownerAt = buildOwnerLookup(await hexRepository.getNeighborOwners(foundHexes.map((hex) => hex.coord)))
-    const conflicts: string[] = []
-    for (const hex of foundHexes) {
-      const check = verifyTakeoverStillValid({
-        hex,
-        expected: expectedByHexId.get(hex.id),
-        acquiringEmpireId: attacker.id,
-        ownerAt,
-      })
-      if (!check.ok) conflicts.push(check.reason)
-    }
-
-    if (conflicts.length > 0) {
-      // Deliberately NOT applied. The payment was captured, so this needs reconciliation — a
-      // refund via Paddle's API, which this scaffold does not yet call. Surfacing it loudly beats
-      // silently granting a takeover whose preconditions no longer hold. 200 so Paddle stops
-      // retrying: retrying cannot fix a state conflict, it would just replay it forever.
+    if (!result.applied) {
+      if (result.reason === 'unknown_hex') {
+        logger.error('payment referenced an unknown hex', { conflicts: result.conflicts })
+        return NextResponse.json({ error: 'Unknown hex in payment metadata' }, { status: 422 })
+      }
+      // Deliberately NOT applied. The payment was captured, so this needs reconciliation — a refund
+      // or a manual grant. 200 so Paddle stops retrying: a retry cannot fix a state conflict.
       logger.error('Paid takeover REJECTED at settlement — payment needs refund/reconciliation', {
         hexIds,
         targetUrl,
-        conflicts,
+        conflicts: result.conflicts,
       })
-      return NextResponse.json({ received: true, applied: false, reason: 'state_conflict', conflicts })
+      return NextResponse.json({ received: true, applied: false, reason: 'state_conflict', conflicts: result.conflicts })
     }
 
-    const lockedUntil = protect ? new Date(Date.now() + PROTECTION_DURATION_MS).toISOString() : null
-    const pricePerHex =
-      foundHexes.length > 1
-        ? Math.round(priceForBulkCluster(foundHexes) / foundHexes.length) // even split across the bundle for the per-tile ledger
-        : null
-
-    for (const hex of foundHexes) {
-      // Capture the previous owner BEFORE applyTakeover overwrites ownerId — otherwise there is
-      // nothing left to notify.
-      const defenderEmpire: Empire | null = hex.ownerId ? await empireRepository.getById(hex.ownerId) : null
-      const price = pricePerHex ?? requiredPriceForHex(hex)
-
-      const updated = await hexRepository.applyTakeover(hex.id, {
-        ownerId: attacker.id,
-        lastPricePaidCents: price,
-        isContested: false,
-        ownedSince: new Date().toISOString(),
-        lockedUntil,
-      })
-
-      // The ledger is what the ticker, the leaderboard and every market figure are derived from,
-      // so it is written as part of applying the takeover rather than reconstructed later.
-      await hexRepository.recordTakeover({
-        coord: hex.coord,
-        attackerEmpireId: attacker.id,
-        defenderEmpireId: defenderEmpire?.id ?? null,
-        pricePaidCents: price,
-      })
-
-      await broadcaster.publish({ type: 'hex:updated', hex: updated })
-      if (defenderEmpire) await notifyDefenderOfTakeover(defenderEmpire, updated, attacker)
+    const transactionId = typeof event.data.id === 'string' ? event.data.id : null
+    if (transactionId) {
+      await repositories.audit
+        .recordSettledPayment({
+          provider: 'paddle',
+          paymentId: transactionId,
+          empireId: result.empire.id,
+          amountCents: result.territoryCents,
+          currency: process.env.PADDLE_CURRENCY_CODE ?? 'USD',
+          hexIds,
+        })
+        .catch((error: unknown) =>
+          logger.error('Could not record settled Paddle payment', {
+            transactionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        )
     }
 
     return NextResponse.json({ received: true })
   } catch (error: unknown) {
+    // Give the claim back, or Paddle's retry would be discarded as a duplicate and the buyer would
+    // have paid for nothing. Then 500, so the retry happens.
+    if (webhookId) await repositories.ledger.releaseWebhookEvent(webhookId).catch(() => undefined)
     logger.error('Failed to apply paid takeover', { error: error instanceof Error ? error.message : String(error) })
-    // Return 500 so Paddle retries delivery — the alternative (200) would silently drop a paid takeover.
     return NextResponse.json({ error: 'Failed to apply takeover' }, { status: 500 })
   }
 }

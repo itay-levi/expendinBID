@@ -93,14 +93,30 @@ export function toHex({ r, g, b }: Rgb): string {
  * A near-black brand colour makes territory indistinguishable from the empty grid, and a near-white
  * one blows out the logo drawn on top of it. Hue is preserved — it is still recognisably theirs.
  */
+const READABLE_MIN_LIGHTNESS = 0.3
+const READABLE_MAX_LIGHTNESS = 0.72
+
 export function ensureReadableOnMap(hex: string): string {
   const rgb = fromHex(hex)
   if (!rgb) return DEFAULT_BRAND_COLOR
 
   const { l } = saturationLightness(rgb.r, rgb.g, rgb.b)
-  if (l >= 0.3 && l <= 0.72) return hex.toUpperCase()
+  if (l >= READABLE_MIN_LIGHTNESS && l <= READABLE_MAX_LIGHTNESS) return hex.toUpperCase()
 
-  const factor = l < 0.3 ? 0.3 / Math.max(l, 0.02) : 0.72 / l
+  // Zero lightness means every channel is zero. There are no ratios to scale, so multiplying
+  // leaves black exactly as unreadable as it arrived — a black-logo brand got black territory,
+  // invisible against the grid, which is the one thing this function exists to prevent. Nothing
+  // about the hue survives to preserve, so lift it to the floor as neutral grey.
+  if (l === 0) {
+    const floor = READABLE_MIN_LIGHTNESS * 255
+    return toHex({ r: floor, g: floor, b: floor })
+  }
+
+  // Lightness scales linearly with the channels, so this lands exactly on the boundary. The old
+  // `Math.max(l, 0.02)` divisor guarded against dividing by zero but capped the lift at 15x, which
+  // left very dark colours (#010101 and friends) short of the floor and still unreadable. The
+  // l === 0 branch above is the guard now, so the factor can be exact.
+  const factor = l < READABLE_MIN_LIGHTNESS ? READABLE_MIN_LIGHTNESS / l : READABLE_MAX_LIGHTNESS / l
   return toHex({ r: rgb.r * factor, g: rgb.g * factor, b: rgb.b * factor })
 }
 
@@ -120,4 +136,27 @@ export function fromHex(hex: string): Rgb | null {
 /** True for a well-formed hex colour. Used to validate anything arriving from a client. */
 export function isValidHexColor(value: unknown): value is string {
   return typeof value === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())
+}
+
+/**
+ * The single gate between an untrusted colour and the database.
+ *
+ * The colour is sampled in the buyer's browser, so it reaches the server as client input like any
+ * other. Three things must hold before it can be stored, and no caller should have to remember
+ * them separately:
+ *
+ *  - **Well-formed**, falling back to the default rather than failing a purchase over a colour.
+ *  - **Exactly six digits.** `#abc` satisfies isValidHexColor but violates the DB's
+ *    empires_color_is_hex CHECK, and ensureReadableOnMap's pass-through branch preserves
+ *    shorthand — so validating with those two alone turns a good payment into a 500.
+ *  - **Legible as a tile fill**, so no value, hostile or merely unlucky, yields territory that
+ *    vanishes against the grid or blows out the logo drawn on it.
+ */
+export function normalizeBrandColor(value: unknown): string {
+  if (!isValidHexColor(value)) return DEFAULT_BRAND_COLOR
+  const rgb = fromHex(value)
+  if (!rgb) return DEFAULT_BRAND_COLOR
+  // Round-trip through toHex FIRST so shorthand is expanded before the readability clamp gets a
+  // chance to hand it back unchanged.
+  return ensureReadableOnMap(toHex(rgb))
 }

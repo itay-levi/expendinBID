@@ -97,8 +97,10 @@ describe('verifyTakeoverStillValid (double-spend / stale-state guard)', () => {
   })
 
   it('REJECTS when adjacency no longer holds at settlement time', () => {
-    const target = hex({ q: 0, r: 0 })
-    // A rival now borders the target and the attacker owns nothing adjacent => blocked.
+    // A DEFENDED tile: reaching it is the whole point of the adjacency rule. Open ground beside a
+    // rival is frontier and stays purchasable, so an unowned target here would prove nothing.
+    const target = hex({ q: 0, r: 0, ownerId: 'defender.com', lastPricePaidCents: 1000 })
+    // A rival borders the target and the attacker owns nothing adjacent => blocked.
     const ownerAt = buildOwnerLookup(new Map([['hex_1,0', 'rival.com']]))
 
     const result = verifyTakeoverStillValid({
@@ -109,6 +111,19 @@ describe('verifyTakeoverStillValid (double-spend / stale-state guard)', () => {
     })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toMatch(/not reachable/i)
+  })
+
+  it('still settles open ground that merely borders a rival', () => {
+    const target = hex({ q: 0, r: 0 })
+    const ownerAt = buildOwnerLookup(new Map([['hex_1,0', 'rival.com']]))
+
+    const result = verifyTakeoverStillValid({
+      hex: target,
+      expected: fingerprintHex(target),
+      acquiringEmpireId: 'attacker.com',
+      ownerAt,
+    })
+    expect(result).toEqual({ ok: true })
   })
 
   it('REJECTS when the webhook carries no pre-payment fingerprint at all', () => {

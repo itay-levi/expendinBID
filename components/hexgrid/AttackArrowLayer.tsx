@@ -39,7 +39,6 @@ const GLYPH_SHARE = 0.62
 export function AttackArrowLayer() {
   const ownedHexes = useGameStore((s) => s.ownedHexes)
   const selectedHexIds = useGameStore((s) => s.selectedHexIds)
-  const myEmpireId = useGameStore((s) => s.myEmpireId)
   const pendingBrand = useGameStore((s) => s.pendingBrand)
   const toggleHexSelection = useGameStore((s) => s.toggleHexSelection)
   const setHoveredHex = useGameStore((s) => s.setHoveredHex)
@@ -52,10 +51,9 @@ export function AttackArrowLayer() {
       selectAttackArrows({
         ownedHexes,
         selectedHexIds,
-        myEmpireId,
         pendingDomain: pendingBrand?.domain ?? null,
       }),
-    [ownedHexes, selectedHexIds, myEmpireId, pendingBrand],
+    [ownedHexes, selectedHexIds, pendingBrand],
   )
 
   const texture = useArrowTexture()

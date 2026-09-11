@@ -8,25 +8,28 @@ export type ArrowSelectorState = {
   ownedHexes: ReadonlyMap<string, HexTile>
   /** Hex ids currently in the buyer's basket. */
   selectedHexIds: readonly string[]
-  /** Set after a completed claim; null on a fresh page load. */
-  myEmpireId: string | null
-  /** Hostname resolved from whatever is typed in the claim bar. */
+  /**
+   * Hostname resolved from whatever is typed in the claim bar, or null when the bar is empty.
+   *
+   * This is the ONLY identity an arrow follows. The store also caches `myEmpireId` from the last
+   * completed claim, but that is an answer to "whose territory is this", not to "is someone trying
+   * to buy right now", and using it here is what put an arrow on every bordering tile.
+   */
   pendingDomain: string | null
 }
 
 /**
- * Who the map should treat as "you".
+ * Who the map should treat as "you": whoever the claim bar currently names.
  *
- * `myEmpireId` is only set after a completed claim and does not survive a reload, so a returning
- * buyer stopped being recognised as the owner of their own territory — which left them with no
- * border, and every arrow disappeared. The domain typed into the claim bar is the SAME identity the
- * server derives (empireRepository keys on hostname), so typing it is enough to be recognised.
+ * The domain typed into the bar is the SAME identity the server derives (empireRepository keys on
+ * hostname), so typing it is enough to be recognised as the owner of territory bought earlier —
+ * including after a reload, which is what once made every arrow disappear.
  *
  * Never a trust boundary: the server re-derives identity from the submitted URL on every request
  * and never reads this value.
  */
 export function resolveActingEmpireId(state: ArrowSelectorState): string | null {
-  return state.myEmpireId ?? state.pendingDomain ?? null
+  return state.pendingDomain ?? null
 }
 
 /**
@@ -38,8 +41,13 @@ export function resolveActingEmpireId(state: ArrowSelectorState): string | null 
  * the reload case that actually broke.
  */
 export function selectAttackArrows(state: ArrowSelectorState): AttackArrow[] {
+  // An arrow is an invitation to take a tile, and no takeover can complete without a URL — the
+  // checkout refuses it and the Pay button reads "Enter your site". Gating on the cached id from a
+  // previous claim, which lives for the rest of the session, blanketed the map with arrows for
+  // anyone who had bought once and then cleared the bar: dozens of invitations to an action they
+  // could not perform. Arrows follow intent to buy, not a past purchase.
   const actingEmpireId = resolveActingEmpireId(state)
-  if (!actingEmpireId) return [] // nobody to attack as: a visitor with no URL entered is browsing
+  if (!actingEmpireId) return []
 
   const selectedKeys = new Set(
     state.selectedHexIds

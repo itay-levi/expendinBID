@@ -45,20 +45,36 @@ describe('rateLimit', () => {
 describe('clientKeyFromRequest', () => {
   const req = (headers: Record<string, string>) => new Request('https://example.test', { headers })
 
-  it('uses the first x-forwarded-for entry', () => {
-    expect(clientKeyFromRequest(req({ 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }), 's')).toBe('s:9.9.9.9')
+  it('uses the address appended by the nearest trusted proxy', () => {
+    // "client-sent, proxy-appended": the proxy's entry is the rightmost one.
+    expect(clientKeyFromRequest(req({ 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }), 's')).toBe('s:10.0.0.1')
   })
 
-  it('cannot be rotated by appending extra forwarded values', () => {
-    // A caller appending addresses must not get a new bucket each request.
-    const a = clientKeyFromRequest(req({ 'x-forwarded-for': '9.9.9.9' }), 's')
-    const b = clientKeyFromRequest(req({ 'x-forwarded-for': '9.9.9.9, 2.2.2.2' }), 's')
-    const c = clientKeyFromRequest(req({ 'x-forwarded-for': '9.9.9.9, 3.3.3.3, 4.4.4.4' }), 's')
-    expect(new Set([a, b, c]).size).toBe(1)
+  it('cannot be rotated by forging the leftmost value', () => {
+    // The attack the old first-entry rule allowed: a fresh forged value per request, each landing in
+    // a new bucket. Behind a proxy the real address is appended after whatever the caller sent.
+    const keys = ['1.1.1.1', '2.2.2.2', 'whatever'].map((forged) =>
+      clientKeyFromRequest(req({ 'x-forwarded-for': `${forged}, 203.0.113.7` }), 's'),
+    )
+    expect(new Set(keys)).toEqual(new Set(['s:203.0.113.7']))
+  })
+
+  it('honours a longer trusted proxy chain', () => {
+    const header = { 'x-forwarded-for': 'forged, 203.0.113.7, 10.0.0.2' }
+    expect(clientKeyFromRequest(req(header), 's', 2)).toBe('s:203.0.113.7')
+  })
+
+  it('uses the single value Vercel writes', () => {
+    expect(clientKeyFromRequest(req({ 'x-forwarded-for': '203.0.113.7' }), 's')).toBe('s:203.0.113.7')
   })
 
   it('falls back to x-real-ip, then to a constant bucket', () => {
     expect(clientKeyFromRequest(req({ 'x-real-ip': '8.8.8.8' }), 's')).toBe('s:8.8.8.8')
     expect(clientKeyFromRequest(req({}), 's')).toBe('s:unknown')
+  })
+
+  it('bounds the key length so an oversized header cannot bloat the bucket map', () => {
+    const key = clientKeyFromRequest(req({ 'x-forwarded-for': 'a'.repeat(5_000) }), 's')
+    expect(key.length).toBeLessThanOrEqual(2 + 64)
   })
 })

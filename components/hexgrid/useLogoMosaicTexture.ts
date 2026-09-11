@@ -4,14 +4,22 @@ import { logoProxyUrl } from '@/lib/brand/logoProxyUrl'
 import type { PlaqueDetail } from '@/lib/hex/clusterFootprint'
 
 /**
- * Canvas resolution by tier. Larger territories render physically larger on screen, so they need
- * more pixels to stay sharp when zoomed in — a fixed size would leave a 30-hex empire's tagline
- * visibly soft.
+ * Canvas resolution, scaled to the territory it will be stretched across.
+ *
+ * Larger territories render physically larger on screen and need more pixels to stay sharp when
+ * zoomed in. Keying this to the detail tier instead of the size was wasteful in both directions:
+ * once four tiles earn a description they became `full`, and a four-tile block was allocating a
+ * 1536x1536 canvas — about 9 MB of texture memory for a mark a few tiles wide, on every such
+ * cluster on the map. The edge now tracks the square root of the tile count, which is how the
+ * territory's on-screen size actually grows.
  */
-const TEXTURE_EDGE_BY_DETAIL: Record<PlaqueDetail, number> = {
-  compact: 512,
-  standard: 1024,
-  full: 1536,
+const MIN_TEXTURE_EDGE = 512
+const MAX_TEXTURE_EDGE = 1536
+const TEXTURE_EDGE_PER_TILE = 256
+
+function textureEdgeForTiles(tileCount: number): number {
+  const edge = TEXTURE_EDGE_PER_TILE * Math.sqrt(Math.max(1, tileCount))
+  return Math.round(Math.min(MAX_TEXTURE_EDGE, Math.max(MIN_TEXTURE_EDGE, edge)))
 }
 
 /** Fraction of the territory the content occupies, leaving a margin clear of the border. */
@@ -36,9 +44,19 @@ export type LogoMosaicInput = {
    * off at the tile edges. These come from the cluster's most interior tile and its clearance
    * (lib/hex/clusterFootprint.ts), so whatever is drawn lands on tiles that are actually theirs.
    */
-  focus: { u: number; v: number; halfU: number; halfV: number }
+  focus: {
+    u: number
+    v: number
+    halfU: number
+    halfV: number
+    /** As far as owned ground actually reaches from the centre. Words stay inside this. */
+    textHalfU: number
+    textHalfV: number
+  }
   /** How much room the territory has — see lib/hex/clusterFootprint.ts. Controls what fits. */
   detail: PlaqueDetail
+  /** Hexes in this cluster. Drives canvas resolution, which tracks on-screen size. */
+  tileCount: number
 }
 
 /**
@@ -69,6 +87,7 @@ export function useLogoMosaicTexture({
   aspect,
   detail,
   focus,
+  tileCount,
 }: LogoMosaicInput): THREE.Texture {
   const [logoImage, setLogoImage] = useState<HTMLImageElement | null>(null)
   const proxiedLogoUrl = useMemo(() => logoProxyUrl(logoUrl), [logoUrl])
@@ -101,10 +120,10 @@ export function useLogoMosaicTexture({
   const texture = useMemo(
     () =>
       createLogoMosaicTexture(
-        { name, domain, title, description, colorHex, aspect: quantisedAspect, detail, focus },
+        { name, domain, title, description, colorHex, aspect: quantisedAspect, detail, focus, tileCount },
         logoImage,
       ),
-    [name, domain, title, description, colorHex, quantisedAspect, detail, focus, logoImage],
+    [name, domain, title, description, colorHex, quantisedAspect, detail, focus, tileCount, logoImage],
   )
 
   useEffect(() => () => texture.dispose(), [texture])
@@ -113,10 +132,20 @@ export function useLogoMosaicTexture({
 }
 
 export function createLogoMosaicTexture(
-  { name, domain, title, description, colorHex, aspect, detail, focus }: Omit<LogoMosaicInput, 'logoUrl'>,
+  {
+    name,
+    domain,
+    title,
+    description,
+    colorHex,
+    aspect,
+    detail,
+    focus,
+    tileCount,
+  }: Omit<LogoMosaicInput, 'logoUrl'>,
   logoImage: HTMLImageElement | null,
 ): THREE.Texture {
-  const edge = TEXTURE_EDGE_BY_DETAIL[detail]
+  const edge = textureEdgeForTiles(tileCount)
   const width = Math.max(2, aspect >= 1 ? edge : Math.round(edge * aspect))
   const height = Math.max(2, aspect >= 1 ? Math.round(edge / aspect) : edge)
 
@@ -128,12 +157,25 @@ export function createLogoMosaicTexture(
   if (ctx) {
     ctx.clearRect(0, 0, width, height)
 
-    // The safe box: centred on the cluster's interior, not the bounding box, and never wider than
-    // the clearance actually available there.
-    const boxWidth = Math.max(8, width * focus.halfU * 2 * CONTAIN_RATIO)
-    const boxHeight = Math.max(8, height * focus.halfV * 2 * CONTAIN_RATIO)
     const centerX = width * focus.u
     const centerY = height * focus.v
+
+    // Two boxes, because a logo and a sentence fail differently when they run off the territory.
+    //
+    // The mosaic paints owned tiles only, so anything past the edge is cut away. On a mark that
+    // reads as deliberate cropping and costs nothing. On a sentence it reads as a defect — the
+    // description came out as "controlled by see.i" — so words are confined to ground measured to
+    // be owned, while the mark keeps the generous estimate.
+    const markWidth = Math.max(8, width * focus.halfU * 2 * CONTAIN_RATIO)
+    const markHeightBox = Math.max(8, height * focus.halfV * 2 * CONTAIN_RATIO)
+    const safeWidth = Math.max(8, width * focus.textHalfU * 2 * CONTAIN_RATIO)
+    const safeHeight = Math.max(8, height * focus.textHalfV * 2 * CONTAIN_RATIO)
+
+    // With nothing to clip, the mark may use the whole estimate; once words are stacked under it
+    // the pair share the box that is known to fit.
+    const showDomain = detail !== 'compact'
+    const boxWidth = showDomain ? safeWidth : markWidth
+    const boxHeight = showDomain ? safeHeight : markHeightBox
     const boxX = centerX - boxWidth / 2
     const boxY = centerY - boxHeight / 2
 
@@ -141,7 +183,6 @@ export function createLogoMosaicTexture(
     // saturated tile colour, and a full-bleed panel would hide the hex grid the mosaic sits on.
     drawContentScrim(ctx, centerX, centerY, Math.max(boxWidth, boxHeight) * 0.62)
 
-    const showDomain = detail !== 'compact'
     const showDescription = detail === 'full' && Boolean(description || title)
 
     // The logo is ALWAYS drawn, always first, always on top. It is the thing that identifies the

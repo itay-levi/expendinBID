@@ -1,10 +1,23 @@
-import { checkHostIsSafeToFetch } from '@/lib/security/ssrfGuard'
+import { guardedFetch } from '@/lib/security/guardedFetch'
+import { logger } from '@/lib/logger'
 
 const FETCH_TIMEOUT_MS = 5_000
 const MAX_RESPONSE_BYTES = 2_000_000 // 2MB cap — a brand's <head> never legitimately needs more
 const MAX_REDIRECTS = 3
+/** Longer than any real asset URL; anything past it is padding or an attack. */
+const MAX_LOGO_URL_LENGTH = 2_048
 
-export type ResolvedBrandMetadata = { title: string; description: string; logoUrl: string; sourceUrl: string }
+export type ResolvedBrandMetadata = {
+  title: string
+  description: string
+  logoUrl: string
+  sourceUrl: string
+  /**
+   * True when the site could not be read and these are hostname placeholders. An existing empire's
+   * real logo and wording are never overwritten with them — see getOrCreateForUrl.
+   */
+  isFallback?: boolean
+}
 
 function decodeHtmlEntities(text: string): string {
   return text
@@ -33,7 +46,13 @@ export function extractIconCandidates(head: string, url: string): IconCandidate[
     if (!href) return
     try {
       // Resolved against the page URL: icons are usually declared as root-relative paths.
-      const absolute = new URL(decodeHtmlEntities(href.trim()), url).toString()
+      const resolved = new URL(decodeHtmlEntities(href.trim()), url)
+      // Only fetchable web URLs. A `data:` icon would be stored verbatim — at any size, since the
+      // column is unbounded — and handed inline to every viewer's browser, skipping the logo proxy's
+      // size cap and content-type allowlist entirely. `javascript:` or `file:` is never a logo.
+      if (resolved.protocol !== 'https:' && resolved.protocol !== 'http:') return
+      const absolute = resolved.toString()
+      if (absolute.length > MAX_LOGO_URL_LENGTH) return
       // "192x192", or "any" for SVG, which is infinitely scalable and so ranks above any raster.
       const match = /(\d+)\s*x\s*\d+/i.exec(sizes ?? '')
       const sizePx = (sizes ?? '').trim().toLowerCase() === 'any' ? 1024 : match ? Number(match[1]) : 0
@@ -82,51 +101,19 @@ export function extractMeta(html: string, url: string): { title: string; descrip
   }
 }
 
-async function fetchWithGuards(targetUrl: string, redirectsLeft: number): Promise<{ html: string; finalUrl: string }> {
-  const parsed = new URL(targetUrl)
-  const hostCheck = await checkHostIsSafeToFetch(parsed.hostname)
-  if (!hostCheck.safe) throw new Error(hostCheck.reason)
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(targetUrl, {
-      signal: controller.signal,
-      redirect: 'manual', // handle redirects ourselves so every hop gets re-checked, not just the first
-      headers: { 'User-Agent': 'HexWarsBrandBot/1.0 (+https://hexwars.example/bot)' },
-    })
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location')
-      if (!location) throw new Error('Redirect with no location')
-      if (redirectsLeft <= 0) throw new Error('Too many redirects')
-      return fetchWithGuards(new URL(location, targetUrl).toString(), redirectsLeft - 1)
-    }
-
-    if (!response.ok) throw new Error(`Target responded with ${response.status}`)
-
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('Empty response')
-
-    const chunks: Uint8Array[] = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      received += value.byteLength
-      if (received > MAX_RESPONSE_BYTES) {
-        await reader.cancel()
-        throw new Error('Response too large')
-      }
-      chunks.push(value)
-    }
-
-    const html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf-8')
-    return { html, finalUrl: targetUrl }
-  } finally {
-    clearTimeout(timeout)
-  }
+/**
+ * Downloads a page through the connect-time SSRF guard (lib/security/guardedFetch.ts), which also
+ * re-checks every redirect hop and caps the decoded body.
+ */
+async function fetchPage(targetUrl: string): Promise<{ html: string; finalUrl: string }> {
+  const response = await guardedFetch(targetUrl, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_RESPONSE_BYTES,
+    maxRedirects: MAX_REDIRECTS,
+    accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
+  })
+  if (!response.ok) throw new Error(`Target responded with ${response.status}`)
+  return { html: response.body.toString('utf-8'), finalUrl: response.finalUrl }
 }
 
 /**
@@ -136,7 +123,7 @@ async function fetchWithGuards(targetUrl: string, redirectsLeft: number): Promis
  * the copy that actually gets embedded in a payment or shown on the map — always re-derive it here.
  */
 export async function resolveBrandMetadata(targetUrl: string): Promise<ResolvedBrandMetadata> {
-  const { html, finalUrl } = await fetchWithGuards(targetUrl, MAX_REDIRECTS)
+  const { html, finalUrl } = await fetchPage(targetUrl)
   const meta = extractMeta(html, finalUrl)
   const finalHost = new URL(finalUrl).hostname
 
@@ -145,5 +132,37 @@ export async function resolveBrandMetadata(targetUrl: string): Promise<ResolvedB
     description: meta.description || `Live territory on Hex Wars, controlled by ${finalHost}.`,
     logoUrl: meta.logoUrl ?? `https://www.google.com/s2/favicons?domain=${finalHost}&sz=128`,
     sourceUrl: finalUrl,
+  }
+}
+
+/** What a buyer's territory shows when their site could not be read. Needs nothing from the site. */
+export function fallbackBrandMetadata(targetUrl: string): ResolvedBrandMetadata {
+  const hostname = new URL(targetUrl).hostname
+  return {
+    title: hostname,
+    description: `Territory on Hex Wars, controlled by ${hostname}.`,
+    logoUrl: `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`,
+    sourceUrl: targetUrl,
+    isFallback: true,
+  }
+}
+
+/**
+ * `resolveBrandMetadata`, but a site that cannot be read degrades to its hostname instead of failing.
+ *
+ * Plenty of real sites rate-limit or block bots outright. Checkout already tolerated that, but the
+ * payment webhook did not: it re-scraped with no fallback, so for such a site every settlement
+ * attempt threw, every provider retry threw again, and a buyer who had paid never received the
+ * territory. A scrape is cosmetic; it must never stand between a payment and its delivery.
+ */
+export async function resolveBrandMetadataOrFallback(targetUrl: string): Promise<ResolvedBrandMetadata> {
+  try {
+    return await resolveBrandMetadata(targetUrl)
+  } catch (error: unknown) {
+    logger.warn('brand scrape failed — falling back to hostname', {
+      hostname: new URL(targetUrl).hostname,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+    return fallbackBrandMetadata(targetUrl)
   }
 }

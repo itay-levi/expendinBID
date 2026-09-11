@@ -1,6 +1,6 @@
 import type { Empire, HexTile } from '@/types/game'
 import { logger } from '@/lib/logger'
-import { checkHostIsSafeToFetch } from '@/lib/security/ssrfGuard'
+import { guardedFetch } from '@/lib/security/guardedFetch'
 
 // Notifies a defender when their hex is taken. Deliberately webhook-only and opt-in:
 //
@@ -15,22 +15,10 @@ import { checkHostIsSafeToFetch } from '@/lib/security/ssrfGuard'
 export async function notifyDefenderOfTakeover(defender: Empire, hex: HexTile, attacker: Empire): Promise<void> {
   if (!defender.notifyWebhookUrl) return
 
-  // The webhook URL was supplied by the defender at their own purchase time — a malicious buyer
-  // could register an internal address (e.g. a cloud metadata IP) to make our server fetch it
-  // whenever someone else attacks their hex. Same SSRF guard as the brand-resolve endpoint.
-  let webhookHost: string
-  try {
-    webhookHost = new URL(defender.notifyWebhookUrl).hostname
-  } catch {
-    logger.warn('Defender webhook URL is not a valid URL', { empireId: defender.id })
-    return
-  }
-  const hostCheck = await checkHostIsSafeToFetch(webhookHost)
-  if (!hostCheck.safe) {
-    logger.warn('Defender webhook URL rejected by SSRF guard', { empireId: defender.id, reason: hostCheck.reason })
-    return
-  }
-
+  // The webhook URL was supplied by the defender at their own purchase time, so a malicious buyer
+  // could register an internal address (e.g. a cloud metadata IP) to make our server hit it whenever
+  // someone attacks their hex. guardedFetch validates the address at connect time — the one check a
+  // DNS-rebinding domain cannot slip past — and never follows a redirect for a POST.
   const payload = {
     event: 'hex.annexed',
     hexId: hex.id,
@@ -40,11 +28,12 @@ export async function notifyDefenderOfTakeover(defender: Empire, hex: HexTile, a
   }
 
   try {
-    const response = await fetch(defender.notifyWebhookUrl, {
+    const response = await guardedFetch(defender.notifyWebhookUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5_000),
+      jsonBody: JSON.stringify(payload),
+      timeoutMs: 5_000,
+      maxBytes: 64_000,
+      maxRedirects: 0,
     })
     if (!response.ok) {
       logger.warn('Defender webhook notification failed', { empireId: defender.id, status: response.status })

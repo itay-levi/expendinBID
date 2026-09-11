@@ -5,6 +5,7 @@ import {
   ensureReadableOnMap,
   fromHex,
   isValidHexColor,
+  normalizeBrandColor,
   saturationLightness,
   toHex,
 } from './dominantColor'
@@ -135,5 +136,63 @@ describe('fromHex / toHex / isValidHexColor', () => {
     expect(isValidHexColor('#ABC; background:url(x)')).toBe(false)
     expect(isValidHexColor(123)).toBe(false)
     expect(isValidHexColor(null)).toBe(false)
+  })
+})
+
+describe('normalizeBrandColor', () => {
+  const SIX_DIGIT = /^#[0-9A-F]{6}$/
+
+  it('keeps a good brand colour', () => {
+    expect(normalizeBrandColor('#FB923C')).toBe('#FB923C')
+  })
+
+  it('expands shorthand, which the DB CHECK constraint would otherwise reject', () => {
+    // The bug this function exists to prevent: `#abc` passes isValidHexColor and survives
+    // ensureReadableOnMap unchanged, then violates empires_color_is_hex and 500s a paid checkout.
+    expect(normalizeBrandColor('#a5b')).toBe('#AA55BB')
+  })
+
+  it('falls back rather than failing a purchase over a bad colour', () => {
+    for (const bad of [undefined, null, '', 'red', '#12345', 'rgb(1,2,3)', 42, {}]) {
+      expect(normalizeBrandColor(bad)).toBe(DEFAULT_BRAND_COLOR)
+    }
+  })
+
+  it('rejects an injection attempt that merely starts with a colour', () => {
+    expect(normalizeBrandColor('#fff;background:url(x)')).toBe(DEFAULT_BRAND_COLOR)
+  })
+
+  it('lifts near-black so territory is not invisible against the grid', () => {
+    const result = normalizeBrandColor('#000000')
+    expect(result).not.toBe('#000000')
+    expect(fromHex(result)!.r).toBeGreaterThan(0)
+  })
+
+  it('always returns something the DB CHECK constraint accepts', () => {
+    const inputs = ['#000', '#fff', '#abc', '#FB923C', '#010203', 'nonsense', undefined]
+    for (const input of inputs) {
+      expect(normalizeBrandColor(input)).toMatch(SIX_DIGIT)
+    }
+  })
+})
+
+describe('ensureReadableOnMap: colours that cannot be scaled into range', () => {
+  it('lifts pure black instead of returning it unchanged', () => {
+    // Multiplying black by any factor is still black, so the old implementation handed this back
+    // exactly as invisible as it arrived.
+    expect(ensureReadableOnMap('#000000')).toBe('#4D4D4D')
+  })
+
+  it('lifts a near-black colour all the way to the floor', () => {
+    // The old 0.02 divisor floor capped the lift at 15x, leaving this at l≈0.06 — still unreadable.
+    const { l } = (() => {
+      const rgb = fromHex(ensureReadableOnMap('#010101'))!
+      return saturationLightness(rgb.r, rgb.g, rgb.b)
+    })()
+    expect(l).toBeCloseTo(0.3, 2)
+  })
+
+  it('leaves a colour already in the legible band alone', () => {
+    expect(ensureReadableOnMap('#AA55BB')).toBe('#AA55BB')
   })
 })

@@ -1,6 +1,7 @@
 import { hexIdFor, resolveHexById, unownedHexAt } from '@/lib/hex/hexIdentity'
 import { hexNeighbors, type AxialCoord } from '@/lib/hex/hexMath'
 import { buildDemoSeed } from '@/lib/demo/seedDemoState'
+import { isHexLocked } from '@/lib/pricing/takeoverPricing'
 import type { HexTile } from '@/types/game'
 
 /**
@@ -35,6 +36,11 @@ export type HexRepository = {
   getOwnedHexesInRange(bounds: HexBounds): Promise<HexTile[]>
   /** Must run inside a row-locked transaction in a real implementation — see ARCHITECTURE.md §8. */
   applyTakeover(hexId: string, updates: Partial<HexTile>): Promise<HexTile>
+  /**
+   * Applies a whole purchase atomically: every tile is row-locked, re-compared against the state
+   * the buyer was quoted, and written together with its ledger entry — or none are.
+   */
+  applyTakeoverBatch(items: TakeoverBatchItem[], now?: Date): Promise<TakeoverBatchResult>
   /** Whether an empire holds any tile at all — gates the one free placement (§23). */
   hasAnyTerritory(empireId: string): Promise<boolean>
   /** Appends to the immutable takeover ledger that feeds the ticker and the market stats. */
@@ -48,6 +54,35 @@ export type TakeoverRecord = {
   attackerEmpireId: string
   defenderEmpireId: string | null
   pricePaidCents: number
+}
+
+/** One tile in an atomic multi-tile settlement. */
+export type TakeoverBatchItem = {
+  hexId: string
+  /**
+   * The state the buyer was quoted against. It is compared against the ROW-LOCKED state and the
+   * whole batch is refused on any mismatch. The comparison has to happen under the lock: checked
+   * beforehand, two payments settling together both pass it and the second silently overwrites the
+   * first, leaving a paying customer without the tile they bought.
+   */
+  expected: { ownerId: string | null; lastPricePaidCents: number }
+  ownerId: string
+  pricePaidCents: number
+  lockedUntil: string | null
+}
+
+export type TakeoverBatchResult =
+  | { applied: true; hexes: HexTile[]; previousOwners: Array<string | null> }
+  | { applied: false; conflicts: string[] }
+
+/** Why a locked tile can no longer be sold at the quoted terms, or null when it still can. */
+export function batchConflictReason(current: HexTile, item: TakeoverBatchItem, now: Date): string | null {
+  if (current.ownerId !== item.expected.ownerId) return `${item.hexId} changed hands before payment settled`
+  if (current.lastPricePaidCents !== item.expected.lastPricePaidCents) {
+    return `${item.hexId} price changed before payment settled`
+  }
+  if (isHexLocked(current, now)) return `${item.hexId} became protected before payment settled`
+  return null
 }
 
 /**
@@ -103,6 +138,37 @@ export const inMemoryHexRepository: HexRepository = {
     if (updated.ownerId) memoryStore.set(hexId, updated)
     else memoryStore.delete(hexId)
     return updated
+  },
+
+  async applyTakeoverBatch(items, now = new Date()) {
+    if (new Set(items.map((item) => item.hexId)).size !== items.length) {
+      return { applied: false, conflicts: ['Duplicate hex in settlement'] }
+    }
+    // Synchronous from the first read to the last write, so nothing can interleave — the in-memory
+    // equivalent of holding every row lock for the duration.
+    const current = items.map((item) => resolveHexById(memoryStore, item.hexId))
+    const conflicts = items
+      .map((item, index) => {
+        const hex = current[index]
+        return hex ? batchConflictReason(hex, item, now) : `Malformed hex id: ${item.hexId}`
+      })
+      .filter((reason): reason is string => reason !== null)
+    if (conflicts.length > 0) return { applied: false, conflicts }
+
+    const ownedSince = now.toISOString()
+    const hexes = items.map((item, index) => {
+      const updated: HexTile = {
+        ...(current[index] as HexTile),
+        ownerId: item.ownerId,
+        lastPricePaidCents: item.pricePaidCents,
+        isContested: false,
+        ownedSince,
+        lockedUntil: item.lockedUntil,
+      }
+      memoryStore.set(item.hexId, updated)
+      return updated
+    })
+    return { applied: true, hexes, previousOwners: current.map((hex) => hex?.ownerId ?? null) }
   },
 
   async hasAnyTerritory(empireId) {

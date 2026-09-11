@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { LegalPageShell } from '@/components/legal/LegalPageShell'
+import { SUPPORT_EMAIL } from '@/lib/site'
 
 // DRAFT LEGAL TEXT — see the note at the top of app/terms/page.tsx. GDPR/CCPA compliance also
 // depends on operational facts this file can't verify on its own (your actual data retention
@@ -14,7 +15,6 @@ export const metadata: Metadata = {
 }
 
 const LAST_UPDATED = 'September 6, 2026'
-const SUPPORT_EMAIL = 'support@hexwars.io'
 
 export default function PrivacyPage() {
   return (

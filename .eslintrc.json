@@ -1,0 +1,9 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    // Brand logos are third-party images served same-origin by app/api/brand/logo, and Next's image
+    // optimizer is deliberately disabled (next.config.js: images.unoptimized) to remove its attack
+    // surface, so next/image would add nothing over <img> here.
+    "@next/next/no-img-element": "off"
+  }
+}

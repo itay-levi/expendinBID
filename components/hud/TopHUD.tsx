@@ -8,6 +8,8 @@ import { LiveTicker } from './LiveTicker'
 import { CountdownTimer } from './CountdownTimer'
 import { LiveVisitorsWidget } from './LiveVisitorsWidget'
 import { FooterNav } from '@/components/layout/FooterNav'
+import { soundEngine } from '@/lib/audio/soundEngine'
+import { useBattleSounds } from '@/lib/audio/useBattleSounds'
 
 type TopHUDProps = {
   totalWarRevenueCents: number
@@ -25,6 +27,16 @@ type TopHUDProps = {
  */
 export function TopHUD({ totalWarRevenueCents, activeConflicts, tickerMessages, warEndsAt }: TopHUDProps) {
   const [soundEnabled, setSoundEnabled] = useState(false)
+  useBattleSounds(soundEnabled)
+
+  const toggleSound = () => {
+    const next = !soundEnabled
+    // Browsers only allow audio to start inside a user gesture, so the engine is created on the
+    // first click rather than on mount.
+    if (next) void soundEngine.init().then(() => soundEngine.setMuted(false))
+    else soundEngine.setMuted(true)
+    setSoundEnabled(next)
+  }
 
   return (
     <motion.header
@@ -65,7 +77,7 @@ export function TopHUD({ totalWarRevenueCents, activeConflicts, tickerMessages, 
 
           <button
             type="button"
-            onClick={() => setSoundEnabled((enabled) => !enabled)}
+            onClick={toggleSound}
             aria-label={soundEnabled ? 'Mute battle sounds' : 'Unmute battle sounds'}
             aria-pressed={soundEnabled}
             className="flex items-center gap-1.5 rounded-lg border border-glass-border px-2.5 py-1.5 text-xs font-medium text-white/70 transition-colors hover:border-hexwars-cyan hover:text-hexwars-cyan"

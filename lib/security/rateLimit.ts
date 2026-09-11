@@ -52,16 +52,40 @@ export function resetRateLimits(): void {
   lastSweep = Date.now()
 }
 
+/** Longest client key kept. A header is attacker-sized; the bucket map should not be. */
+const MAX_KEY_IP_LENGTH = 64
+
 /**
- * Best-effort client identity. `x-forwarded-for` is trivially spoofable unless the app sits behind
- * a proxy that overwrites it, so this is abuse-dampening, not authentication. Take the FIRST entry:
- * appending values to that header is exactly how a caller tries to rotate identity per request.
+ * How many reverse proxies sit in front of the app and append to `x-forwarded-for`.
+ *
+ * One covers Vercel (which overwrites the header with the real client address) and a single
+ * nginx/Cloudflare hop. Set TRUSTED_PROXY_HOPS if the chain is longer.
  */
-export function clientKeyFromRequest(request: Request, scope: string): string {
-  const forwarded = request.headers.get('x-forwarded-for')
-  const realIp = request.headers.get('x-real-ip')
-  const ip = forwarded?.split(',')[0]?.trim() || realIp?.trim() || 'unknown'
-  return `${scope}:${ip}`
+function trustedProxyHops(): number {
+  const configured = Number(process.env.TRUSTED_PROXY_HOPS ?? 1)
+  return Number.isInteger(configured) && configured >= 1 && configured <= 10 ? configured : 1
+}
+
+/**
+ * Best-effort client identity for rate limiting.
+ *
+ * Reads `x-forwarded-for` from the RIGHT. Each proxy appends the address it received the connection
+ * from, so the rightmost entries are the ones our own infrastructure wrote and the leftmost ones are
+ * whatever the caller put there. Taking the FIRST entry — as this used to — handed the caller a
+ * fresh bucket per request just by sending a different forged value each time, which made every
+ * limit in the app decorative.
+ *
+ * Still abuse-dampening, not authentication: with no proxy in front at all, every one of these
+ * headers is caller-controlled, so production must run behind one.
+ */
+export function clientKeyFromRequest(request: Request, scope: string, hops: number = trustedProxyHops()): string {
+  const chain = (request.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const fromProxy = chain.length > 0 ? chain[Math.max(0, chain.length - hops)] : undefined
+  const ip = fromProxy || request.headers.get('x-real-ip')?.trim() || 'unknown'
+  return `${scope}:${ip.slice(0, MAX_KEY_IP_LENGTH)}`
 }
 
 export function tooManyRequests(retryAfterSeconds: number): Response {

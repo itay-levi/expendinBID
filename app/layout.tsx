@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google'
 import Script from 'next/script'
 import './globals.css'
@@ -21,9 +21,31 @@ const mono = JetBrains_Mono({
   weight: ['500', '700'],
 })
 
+const TITLE = 'HEX WARS: Ad Takeover'
+const DESCRIPTION = 'Real-time multiplayer ad-takeover strategy on a live hex map.'
+
+/** Absolute base for share previews. A malformed SITE_URL must not break every page's metadata. */
+function metadataBase(): URL {
+  try {
+    return new URL(process.env.SITE_URL || 'http://localhost:3000')
+  } catch {
+    return new URL('http://localhost:3000')
+  }
+}
+
 export const metadata: Metadata = {
-  title: 'HEX WARS: Ad Takeover',
-  description: 'Real-time multiplayer ad-takeover strategy on a live hex map.',
+  metadataBase: metadataBase(),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, type: 'website', siteName: 'Hex Wars' },
+  twitter: { card: 'summary', title: TITLE, description: DESCRIPTION },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  // Matches the map's background, so mobile browser chrome blends into the scene.
+  themeColor: '#0B0E14',
 }
 
 // Public site identifier, not a secret — safe to inline into the client bundle (NEXT_PUBLIC_*).

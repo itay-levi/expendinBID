@@ -16,6 +16,12 @@ export type LedgerRepository = {
    * both apply the takeover. Here exactly one INSERT wins.
    */
   claimWebhookEvent(webhookId: string): Promise<boolean>
+  /**
+   * Hands a claimed id back after processing failed, so the provider's retry is processed rather
+   * than discarded as a duplicate. Without it, a transient failure after the claim — a database blip
+   * mid-settlement — turned every retry into a no-op, and the buyer paid for nothing.
+   */
+  releaseWebhookEvent(webhookId: string): Promise<void>
 }
 
 type StatsRow = {
@@ -92,6 +98,10 @@ export function createPostgresLedgerRepository(db: Database = getDatabase()): Le
       // DO NOTHING returns no row on conflict, so an empty result means "already processed".
       return rows.length > 0
     },
+
+    async releaseWebhookEvent(webhookId) {
+      await db.query('DELETE FROM processed_webhook_events WHERE webhook_id = $1', [webhookId])
+    },
   }
 }
 
@@ -119,6 +129,9 @@ export function createInMemoryLedgerRepository(): LedgerRepository {
       if (seen.has(webhookId)) return false
       seen.add(webhookId)
       return true
+    },
+    async releaseWebhookEvent(webhookId) {
+      seen.delete(webhookId)
     },
   }
 }

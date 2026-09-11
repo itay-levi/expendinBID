@@ -1,4 +1,4 @@
-import { axialKey, axialToPixel, hexNeighbors, type AxialCoord } from './hexMath'
+import { axialKey, axialToPixel, hexNeighbors, pixelToHex, type AxialCoord, type PixelCoord } from './hexMath'
 import { HEX_SIZE } from './mapConfig'
 import type { ClusterBounds } from './hexGeometry'
 
@@ -50,7 +50,7 @@ export function computeClusterFootprint(cluster: AxialCoord[]): ClusterFootprint
   // A cluster with no boundary at all can't occur on a finite map (edge hexes always border the
   // void), but treating it as uniformly shallow keeps this total rather than returning undefined.
   if (queue.length === 0) {
-    return { anchor: first, depth: 1, detail: detailForDepth(1) }
+    return { anchor: first, depth: 1, detail: detailForCluster(cluster.length) }
   }
 
   let anchor = queue[0]!
@@ -73,31 +73,31 @@ export function computeClusterFootprint(cluster: AxialCoord[]): ClusterFootprint
     }
   }
 
-  return { anchor, depth: maxDepth, detail: detailForDepth(maxDepth) }
+  return { anchor, depth: maxDepth, detail: detailForCluster(cluster.length) }
 }
 
-function detailForDepth(depth: number): PlaqueDetail {
-  // Every tier carries the logo *and* the domain: a tile has to say who owns it without being
-  // hovered, and a bare mark doesn't do that for a company nobody recognizes by its icon. What
-  // scales is how much room each element gets, and whether there's space for the scraped title
-  // on top — at one hex wide it would render a couple of pixels tall and read as noise.
-  if (depth <= 1) return 'compact'
-  if (depth === 2) return 'standard'
+/** Tiles a cluster needs before the domain, and then the description, earn their place. */
+const STANDARD_MIN_TILES = 2
+const FULL_MIN_TILES = 4
+
+function detailForCluster(tileCount: number): PlaqueDetail {
+  // Driven purely by how much ground there is.
+  //
+  // Gating on depth alone was the bug: erosion depth reaches 2 only when some tile is completely
+  // enclosed, which takes seven hexes, and 3 at nineteen. So a buyer holding a solid block of four
+  // or five tiles — visibly substantial, and paying an escalating price for it — got a bare logo
+  // with no name and no description at all, while the tier that shows a sentence was unreachable
+  // below nineteen tiles.
+  //
+  // Shape deliberately plays no part here, because depth cannot see it: a five-tile blob and a
+  // five-tile line both erode to depth 1. A tier is only permission to try — `inscribedContentBox`
+  // measures the room that actually exists, and the renderer drops any line that cannot reach a
+  // legible size in it. A thin chain is therefore held back by measurement, not by a guess.
+  if (tileCount < STANDARD_MIN_TILES) return 'compact'
+  if (tileCount < FULL_MIN_TILES) return 'standard'
   return 'full'
 }
 
-/**
- * Side length, in world units, of the square plaque a footprint of this depth can carry.
- *
- * A flat-top hex of side `s` has apothem `s * sqrt(3) / 2` — the radius of its *inscribed* circle,
- * which is the measurement that matters here, since the plaque has to stay inside the tile rather
- * than reach its corners. `depth` rings of clearance around the anchor gives a combined apothem of
- * `sqrt(3) * (depth - 0.5) * s`, and the square plaque spans twice that, less a margin so it never
- * quite touches the cluster's outer edge.
- */
-export function plaqueSideForDepth(depth: number, hexSize: number): number {
-  return 2 * Math.sqrt(3) * (depth - 0.5) * hexSize * 0.9
-}
 
 /**
  * Where a cluster's mark should sit inside its bounding box, in 0..1 texture space.
@@ -156,6 +156,11 @@ export function focusForCluster(cluster: AxialCoord[], bounds: ClusterBounds) {
   const clearanceCap = footprint.depth * Math.sqrt(3) * HEX_SIZE
   const safeRadius = Math.min(areaRadius, clearanceCap)
 
+  // Words get a box measured against the territory rather than estimated from it. The mark keeps
+  // the generous one: cropping a logo at a tile edge looks intentional, cropping a sentence does
+  // not. See `inscribedContentBox`.
+  const textBox = inscribedContentBox(cluster, anchor, bounds, HEX_SIZE)
+
   return {
     detail: footprint.detail,
     focus: {
@@ -164,6 +169,82 @@ export function focusForCluster(cluster: AxialCoord[], bounds: ClusterBounds) {
       v: depth > 0 ? 1 - (anchor.z - bounds.minZ) / depth : 0.5,
       halfU: width > 0 ? safeRadius / width : 0.5,
       halfV: depth > 0 ? safeRadius / depth : 0.5,
+      // Same centre, but only as far as owned ground actually reaches.
+      textHalfU: width > 0 ? Math.min(textBox.halfWidth, safeRadius) / width : 0.5,
+      textHalfV: depth > 0 ? Math.min(textBox.halfHeight, safeRadius) / depth : 0.5,
     },
+  }
+}
+
+/** Grid resolution used to test whether a candidate box lies on owned ground. */
+const COVERAGE_SAMPLES = 8
+/** Centre-weighted share of a box that must sit on owned tiles for it to be usable for text. */
+const MIN_OWNED_COVERAGE = 0.9
+/** Halvings of the search interval. 12 puts the answer within ~0.02% of the true largest box. */
+const FIT_ITERATIONS = 12
+
+/**
+ * The largest axis-aligned box centred on `center` that lands only on tiles this cluster owns.
+ *
+ * Words need this; the logo does not. The mosaic paints owned tiles and nothing else, so anything
+ * drawn past the territory's edge is simply cut away. On a mark that reads as deliberate cropping.
+ * On a sentence it reads as a defect — "Territory on Hex Wars, controlled by see.i" — which is
+ * what a buyer paying for the space actually sees. Fitting the text inside verified ground is what
+ * keeps the sentence whole, and it is measured rather than assumed because territory is any shape:
+ * an L, a ring, a crescent. The erosion depth alone can only certify a single hex for most real
+ * clusters, which would shrink a five-tile block's text to nothing.
+ *
+ * Returns half-extents in world units. Never returns zero: the fallback is one hex's inscribed
+ * circle, which is owned by construction whenever `center` sits on a tile.
+ */
+export function inscribedContentBox(
+  cluster: AxialCoord[],
+  center: PixelCoord,
+  bounds: ClusterBounds,
+  hexSize: number,
+): { halfWidth: number; halfHeight: number } {
+  const members = new Set(cluster.map(axialKey))
+
+  // Demanding every sample land on owned ground sounds right and is far too strict: a hex tiling
+  // contains almost no axis-aligned rectangle, so a solid five-tile block measured out at under
+  // one hex across — starving the very case this was meant to serve. A rectangle is accepted when
+  // nearly all of it is owned, and the corners are what it is allowed to give up: text is centred
+  // both ways, so the middle band is where the words actually are.
+  const covers = (halfWidth: number, halfHeight: number): boolean => {
+    let inside = 0
+    let total = 0
+    for (let i = 0; i <= COVERAGE_SAMPLES; i += 1) {
+      const u = -1 + (2 * i) / COVERAGE_SAMPLES
+      const x = center.x + u * halfWidth
+      for (let j = 0; j <= COVERAGE_SAMPLES; j += 1) {
+        const v = -1 + (2 * j) / COVERAGE_SAMPLES
+        // Weight toward the middle: a missing corner costs little, a hole under the text costs
+        // the sentence.
+        const weight = 1 + 2 * (1 - Math.max(Math.abs(u), Math.abs(v)))
+        total += weight
+        const z = center.z + v * halfHeight
+        if (members.has(axialKey(pixelToHex({ x, z }, hexSize)))) inside += weight
+      }
+    }
+    return total > 0 && inside / total >= MIN_OWNED_COVERAGE
+  }
+
+  // Search along the territory's own proportions, so a wide empire gets a wide box rather than a
+  // square one cropped to its narrowest axis.
+  const reachX = Math.max(bounds.maxX - center.x, center.x - bounds.minX)
+  const reachZ = Math.max(bounds.maxZ - center.z, center.z - bounds.minZ)
+
+  let low = 0
+  let high = 1
+  for (let step = 0; step < FIT_ITERATIONS; step += 1) {
+    const mid = (low + high) / 2
+    if (covers(reachX * mid, reachZ * mid)) low = mid
+    else high = mid
+  }
+
+  const apothem = (Math.sqrt(3) / 2) * hexSize
+  return {
+    halfWidth: Math.max(reachX * low, apothem * 0.7),
+    halfHeight: Math.max(reachZ * low, apothem * 0.7),
   }
 }

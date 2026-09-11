@@ -62,6 +62,11 @@ export function parseTargetUrl(input: string): ParsedTargetUrl {
   if (parsed.username || parsed.password) {
     return { success: false, error: 'Credentials in URLs are not supported' }
   }
+  // Canonicalize the fully-qualified form: `brand.com.` is the same site as `brand.com`, but a
+  // different string — so it became a separate empire, slipped past the chargeback blocklist, and
+  // (as `localhost.`) past the blocked-host check below. Stripped here, before any check runs,
+  // because this is where every identity in the app is derived from.
+  parsed.hostname = parsed.hostname.replace(/\.+$/, '')
   if (!parsed.hostname) {
     return { success: false, error: 'Enter a valid URL, e.g. https://mycompany.com' }
   }

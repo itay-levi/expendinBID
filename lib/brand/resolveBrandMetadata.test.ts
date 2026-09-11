@@ -146,3 +146,24 @@ describe('extractIconCandidates — logo priority', () => {
     expect(() => extractIconCandidates('<link rel="icon" href="ht tp://:::"/>', 'https://x.com/')).not.toThrow()
   })
 })
+
+describe('extractIconCandidates: only fetchable web URLs become logos', () => {
+  const PAGE = 'https://brand.example/'
+
+  it('skips a data: icon and falls through to the next real one', () => {
+    const head = `
+      <link rel="apple-touch-icon" href="data:image/svg+xml;base64,${'A'.repeat(4000)}">
+      <link rel="icon" href="/favicon.png" sizes="32x32">`
+    expect(extractIconCandidates(head, PAGE).map((c) => c.href)).toEqual(['https://brand.example/favicon.png'])
+  })
+
+  it('never offers a javascript: or file: href', () => {
+    const head = `<link rel="icon" href="javascript:alert(1)"><link rel="icon" href="file:///etc/passwd">`
+    expect(extractIconCandidates(head, PAGE)).toEqual([])
+  })
+
+  it('drops an absurdly long URL', () => {
+    const head = `<link rel="icon" href="/${'x'.repeat(3000)}.png">`
+    expect(extractIconCandidates(head, PAGE)).toEqual([])
+  })
+})

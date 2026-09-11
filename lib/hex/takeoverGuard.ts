@@ -63,7 +63,7 @@ export function verifyTakeoverStillValid(args: {
   }
 
   // Territory can shift underneath a pending payment, so adjacency is re-checked too.
-  const eligibility = checkHexEligibility(hex.coord, ownerAt, acquiringEmpireId)
+  const eligibility = checkHexEligibility(hex.coord, ownerAt, acquiringEmpireId, hex.ownerId)
   if (!eligibility.eligible) {
     return { ok: false, reason: `${hex.id}: ${ELIGIBILITY_MESSAGES[eligibility.reason]}` }
   }
@@ -73,4 +73,33 @@ export function verifyTakeoverStillValid(args: {
 
 export function buildOwnerLookup(ownerByHexId: ReadonlyMap<string, string>): (coord: AxialCoord) => string | null {
   return (coord) => ownerByHexId.get(hexIdFor(coord)) ?? null
+}
+
+/**
+ * Reads the fingerprints a checkout embedded in payment metadata.
+ *
+ * Accepts the JSON string checkout writes, or an already-parsed array. Anything malformed yields an
+ * empty map, which fails closed: a tile with no recorded pre-payment state is never applied.
+ */
+export function parseFingerprints(raw: unknown): Map<string, HexFingerprint> {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return new Map()
+    }
+  }
+  if (!Array.isArray(parsed)) return new Map()
+  return new Map(
+    parsed
+      .filter(
+        (entry): entry is HexFingerprint =>
+          Boolean(entry) &&
+          typeof (entry as HexFingerprint).hexId === 'string' &&
+          typeof (entry as HexFingerprint).lastPricePaidCents === 'number' &&
+          ((entry as HexFingerprint).ownerId === null || typeof (entry as HexFingerprint).ownerId === 'string'),
+      )
+      .map((entry) => [entry.hexId, entry]),
+  )
 }

@@ -22,6 +22,12 @@ const CONTESTED_COLOR = '#FF3366'
 type BrandHexTileProps = {
   /** A contiguous same-owner cluster (see lib/hex/hexMath.ts floodFillCluster). */
   cluster: AxialCoord[]
+  /**
+   * The cluster's exact tile set as a stable string. `cluster` is a new array on every map update,
+   * so memo compares this instead — an untouched territory then skips rendering entirely, rather
+   * than rebuilding its geometry and redrawing its logo texture because a neighbour changed.
+   */
+  signature: string
   empire: Empire
   isContested: boolean
   onHexHover: (hexId: string | null) => void
@@ -75,6 +81,7 @@ function BrandHexTileImpl({ cluster, empire, isContested, onHexHover }: BrandHex
     aspect: territoryDepth > 0 ? territoryWidth / territoryDepth : 1,
     detail: placement.detail,
     focus: placement.focus,
+    tileCount: cluster.length,
   })
 
   const mosaicGeometry = useMemo(() => {
@@ -184,4 +191,11 @@ function BrandHexTileImpl({ cluster, empire, isContested, onHexHover }: BrandHex
  * Memoized: the parent re-renders on any store change, but a cluster's rendered output depends
  * only on the props below. Without this, unrelated updates walked every hex mesh in every empire.
  */
-export const BrandHexTile = memo(BrandHexTileImpl)
+export const BrandHexTile = memo(
+  BrandHexTileImpl,
+  (previous, next) =>
+    previous.signature === next.signature &&
+    previous.empire === next.empire &&
+    previous.isContested === next.isContested &&
+    previous.onHexHover === next.onHexHover,
+)

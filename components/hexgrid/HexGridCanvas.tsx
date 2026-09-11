@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { MapControls, OrthographicCamera } from '@react-three/drei'
 import { clusterHexesByOwner } from '@/lib/hex/clusterHexes'
+import { axialKey } from '@/lib/hex/hexMath'
 import { useGameStore } from '@/lib/state/gameStore'
 import { requestHoverChange } from '@/lib/state/hoverIntent'
 import { EmptyHexField } from './EmptyHexField'
@@ -11,6 +12,7 @@ import { BrandHexTile } from './BrandHexTile'
 import { SelectionLayer } from './SelectionLayer'
 import { PendingClaimLayer } from './PendingClaimLayer'
 import { AttackArrowLayer } from './AttackArrowLayer'
+import { BrandAskCard } from './BrandAskCard'
 
 const ISO_DISTANCE = 24
 
@@ -47,7 +49,24 @@ export function HexGridCanvas() {
   // Both change on pointer movement; reading them here re-rendered the whole scene each time.
   // SelectionLayer and ConquestCardLayer subscribe to them in isolation instead.
 
-  const ownedClusters = useMemo(() => clusterHexesByOwner(Array.from(ownedHexes.values())), [ownedHexes])
+  const ownedClusters = useMemo(
+    () =>
+      clusterHexesByOwner(Array.from(ownedHexes.values())).map((cluster) => {
+        const coords = cluster.hexes.map((hex) => hex.coord)
+        // A territory's identity is its exact tile set. Keyed by owner alone, an empire holding two
+        // separate pockets rendered two children with the same key, and React was free to hand one
+        // pocket's texture and geometry to the other.
+        const signature = coords.map(axialKey).sort().join(';')
+        return {
+          ownerId: cluster.ownerId,
+          key: `${cluster.ownerId}@${signature}`,
+          signature,
+          coords,
+          isContested: cluster.hexes.some((hex) => hex.isContested),
+        }
+      }),
+    [ownedHexes],
+  )
 
   return (
     <Canvas
@@ -94,10 +113,11 @@ export function HexGridCanvas() {
         if (!empire) return null
         return (
           <BrandHexTile
-            key={cluster.ownerId}
-            cluster={cluster.hexes.map((hex) => hex.coord)}
+            key={cluster.key}
+            signature={cluster.signature}
+            cluster={cluster.coords}
             empire={empire}
-            isContested={cluster.hexes.some((hex) => hex.isContested)}
+            isContested={cluster.isContested}
             onHexHover={requestHoverChange}
           />
         )
@@ -106,6 +126,7 @@ export function HexGridCanvas() {
       <SelectionLayer />
       <PendingClaimLayer />
       <AttackArrowLayer />
+      <BrandAskCard />
     </Canvas>
   )
 }

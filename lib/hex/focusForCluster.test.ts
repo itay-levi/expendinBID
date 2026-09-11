@@ -91,10 +91,23 @@ describe('focusForCluster', () => {
     }
   })
 
-  it('reports a richer detail tier as the territory gets fatter', () => {
+  it('reports a richer detail tier as the territory gets bigger', () => {
     expect(focusOf([origin]).detail).toBe('compact')
-    expect(focusOf(hexesInRadius(origin, 1)).detail).toBe('standard')
+    expect(focusOf([origin, { q: 1, r: 0 }]).detail).toBe('standard')
+    expect(focusOf(hexesInRadius(origin, 1)).detail).toBe('full')
     expect(focusOf(hexesInRadius(origin, 2)).detail).toBe('full')
+  })
+
+  it('keeps the text box inside the mark box', () => {
+    // Words are confined to measured ground; the mark may use the generous estimate and be cropped
+    // at a tile edge, which looks intentional in a way a cut-off sentence never does.
+    for (const cluster of [[origin], hexesInRadius(origin, 1), hexesInRadius(origin, 2)]) {
+      const { focus } = focusForCluster(cluster, clusterWorldBounds(cluster, HEX_SIZE))
+      expect(focus.textHalfU).toBeLessThanOrEqual(focus.halfU)
+      expect(focus.textHalfV).toBeLessThanOrEqual(focus.halfV)
+      expect(focus.textHalfU).toBeGreaterThan(0)
+      expect(focus.textHalfV).toBeGreaterThan(0)
+    }
   })
 
   it('does not blow up on a long thin chain', () => {

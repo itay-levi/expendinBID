@@ -50,7 +50,7 @@ export function HexInspector() {
     hex.coord,
     (coord) => selectOwnerAt({ ownedHexes }, coord),
     myEmpireId,
-    { selectedKeys },
+    { selectedKeys, targetOwnerId: hex.ownerId },
   )
   const isBlocked = !eligibility.eligible
   const logoSrc = logoProxyUrl(owner?.logoUrl)

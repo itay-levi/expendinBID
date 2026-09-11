@@ -1,5 +1,6 @@
 import type { Empire } from '@/types/game'
 import type { ResolvedBrandMetadata } from '@/lib/brand/resolveBrandMetadata'
+import { DEFAULT_BRAND_COLOR } from '@/lib/brand/dominantColor'
 import { buildDemoSeed } from '@/lib/demo/seedDemoState'
 
 // Same Repository-pattern placeholder as hexRepository.ts — in-memory here, a real
@@ -9,7 +10,12 @@ export type EmpireRepository = {
   /** Read-only — does NOT create an empire. Used to check "does this URL already control
    *  territory" before payment, without prematurely creating a record for an unpaid attempt. */
   findByUrl(url: string): Promise<Empire | null>
-  getOrCreateForUrl(url: string, metadata: ResolvedBrandMetadata): Promise<Empire>
+  getOrCreateForUrl(
+    url: string,
+    metadata: ResolvedBrandMetadata,
+    /** Sampled from the logo. Omitted falls back to the palette default. */
+    primaryColorHex?: string,
+  ): Promise<Empire>
   /** Batched read for a map response — one query for a whole page of hexes, not one per owner. */
   getByIds(empireIds: string[]): Promise<Empire[]>
 }
@@ -25,7 +31,7 @@ export const inMemoryEmpireRepository: EmpireRepository = {
   async findByUrl(url) {
     return memoryStore.get(new URL(url).hostname) ?? null
   },
-  async getOrCreateForUrl(url, metadata) {
+  async getOrCreateForUrl(url, metadata, primaryColorHex) {
     const hostname = new URL(url).hostname
     const existing = memoryStore.get(hostname)
     if (existing) return existing
@@ -36,7 +42,7 @@ export const inMemoryEmpireRepository: EmpireRepository = {
       url,
       name: hostname.split('.')[0] ?? hostname,
       logoUrl: metadata.logoUrl,
-      primaryColorHex: '#8A2BE2',
+      primaryColorHex: primaryColorHex ?? DEFAULT_BRAND_COLOR,
       ogTitle: metadata.title,
       ogDescription: metadata.description,
       capitalHexId: '',

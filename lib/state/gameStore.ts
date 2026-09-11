@@ -31,6 +31,16 @@ type GameState = {
   selectedHexIds: string[]
   /** Brand resolved from the URL in the claim bar, previewed on selected hexes before payment. */
   pendingBrand: PendingBrand | null
+  /**
+   * What the buyer has typed, held here rather than in the claim bar's own state.
+   *
+   * Two surfaces write to it — the bar itself and the card pinned to the first claimed tile — and
+   * they have to be the same field. Answering on the tile must fill the bar, or the buyer would
+   * appear to have entered nothing.
+   */
+  claimUrlInput: string
+  /** Set once the on-tile ask has been answered or closed. It never returns after that. */
+  brandAskDismissed: boolean
   myEmpireId: string | null
 }
 
@@ -39,6 +49,8 @@ type GameActions = {
   toggleHexSelection: (hexId: string) => void
   clearSelection: () => void
   setPendingBrand: (brand: PendingBrand | null) => void
+  setClaimUrlInput: (value: string) => void
+  dismissBrandAsk: () => void
   applyHexUpdate: (hex: HexTile) => void
   applyEmpireUpsert: (empire: Empire) => void
   applyTakeoverEvent: (event: TakeoverEvent) => void
@@ -72,8 +84,69 @@ function isWorthStoring(hex: HexTile): boolean {
   return hex.ownerId !== null || hex.lockedUntil !== null || hex.isContested
 }
 
+/** Field equality for everything about a hex that affects rendering or pricing. */
+function sameHex(a: HexTile, b: HexTile): boolean {
+  return (
+    a.ownerId === b.ownerId &&
+    a.lastPricePaidCents === b.lastPricePaidCents &&
+    a.isContested === b.isContested &&
+    a.isCapital === b.isCapital &&
+    a.ownedSince === b.ownedSince &&
+    a.lockedUntil === b.lockedUntil
+  )
+}
+
+function sameEmpire(a: Empire, b: Empire): boolean {
+  return (
+    a.name === b.name &&
+    a.domain === b.domain &&
+    a.url === b.url &&
+    a.logoUrl === b.logoUrl &&
+    a.primaryColorHex === b.primaryColorHex &&
+    a.ogTitle === b.ogTitle &&
+    a.ogDescription === b.ogDescription &&
+    a.capitalHexId === b.capitalHexId &&
+    a.foundedAt === b.foundedAt &&
+    a.notifyWebhookUrl === b.notifyWebhookUrl
+  )
+}
+
+function sameMarket(a: MarketSnapshot, b: MarketSnapshot): boolean {
+  return (Object.keys(a) as Array<keyof MarketSnapshot>).every((key) => a[key] === b[key])
+}
+
+/**
+ * The next id-keyed Map for `incoming`, reusing `previous` wherever nothing changed.
+ *
+ * Entries equal to what is already held keep their existing object, and if every entry matches
+ * and none were added or removed, `previous` itself is returned. Callers subscribe by reference,
+ * so this is what lets an unchanged poll cost nothing downstream.
+ */
+export function reconcileById<T extends { id: string }>(
+  previous: Map<string, T>,
+  incoming: readonly T[],
+  isSame: (a: T, b: T) => boolean,
+): Map<string, T> {
+  const next = new Map<string, T>()
+  let changed = false
+  for (const item of incoming) {
+    const existing = previous.get(item.id)
+    if (existing && isSame(existing, item)) {
+      next.set(item.id, existing)
+    } else {
+      next.set(item.id, item)
+      changed = true
+    }
+  }
+  if (next.size !== previous.size) changed = true
+  return changed ? next : previous
+}
+
 // Immutable updates throughout: every action replaces the Map with a new one rather than
 // mutating in place, so React/zustand subscribers always see a distinct reference on change.
+/** The whole store — state plus actions — for code that reads it outside a component. */
+export type GameStore = GameState & GameActions
+
 export const useGameStore = create<GameState & GameActions>((set, get) => ({
   ownedHexes: new Map(),
   empires: new Map(),
@@ -82,6 +155,8 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   hoveredHexId: null,
   selectedHexIds: [],
   pendingBrand: null,
+  claimUrlInput: '',
+  brandAskDismissed: false,
   myEmpireId: null,
 
   setHoveredHex: (hexId) => set({ hoveredHexId: hexId }),
@@ -96,6 +171,10 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
   clearSelection: () => set({ selectedHexIds: [] }),
 
   setPendingBrand: (brand) => set({ pendingBrand: brand }),
+
+  setClaimUrlInput: (value) => set({ claimUrlInput: value }),
+
+  dismissBrandAsk: () => set({ brandAskDismissed: true }),
 
   applyHexUpdate: (hex) =>
     set((state) => {
@@ -132,9 +211,13 @@ export const useGameStore = create<GameState & GameActions>((set, get) => ({
 
   loadSnapshot: ({ empires, hexes, market }) =>
     set((state) => ({
-      empires: new Map(empires.map((empire) => [empire.id, empire])),
-      ownedHexes: new Map(hexes.filter(isWorthStoring).map((hex) => [hex.id, hex])),
-      market: market ?? state.market,
+      // Every poll delivers a fresh copy of mostly the same world. Replacing these Maps wholesale
+      // handed every subscriber a new reference each time, so every territory re-clustered and
+      // re-drew its logo texture every 8 seconds whether or not anything had changed — the flicker,
+      // and most of the idle CPU/GPU cost. Unchanged entries and unchanged Maps keep their identity.
+      empires: reconcileById(state.empires, empires, sameEmpire),
+      ownedHexes: reconcileById(state.ownedHexes, hexes.filter(isWorthStoring), sameHex),
+      market: market && !sameMarket(state.market, market) ? market : state.market,
       // The basket is deliberately PRESERVED. This runs on every poll of /api/map, so clearing it
       // here wiped the buyer's selection every few seconds mid-flow. Nothing needs clearing: prices
       // and eligibility are re-derived from the incoming hexes on render, so a selection whose

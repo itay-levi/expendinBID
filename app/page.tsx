@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { HexGridCanvas } from '@/components/hexgrid/HexGridCanvas'
+import dynamic from 'next/dynamic'
 import { TopHUD } from '@/components/hud/TopHUD'
 import { HexInspector } from '@/components/hud/HexInspector'
 import { BottomDashboard } from '@/components/dashboard/BottomDashboard'
@@ -9,6 +9,14 @@ import { useGameStore } from '@/lib/state/gameStore'
 import { useMapSync } from '@/lib/state/useMapSync'
 import { formatCents } from '@/lib/pricing/takeoverPricing'
 import type { HallOfFameEntry } from '@/components/dashboard/HallOfFamePanel'
+
+// The 3D stack — three, @react-three/fiber, drei — is most of this page's JavaScript and has
+// nothing to render on the server. As its own chunk it no longer blocks the HUD and claim bar from
+// becoming interactive; the placeholder is the scene's own background colour, so nothing flashes.
+const HexGridCanvas = dynamic(
+  () => import('@/components/hexgrid/HexGridCanvas').then((module) => module.HexGridCanvas),
+  { ssr: false, loading: () => <div aria-hidden className="fixed inset-0 z-0 bg-hexwars-bg" /> },
+)
 
 // Fictional company names, deliberately — see ARCHITECTURE.md §14 on why real brand names aren't
 // baked into demo data even as placeholders.
@@ -47,17 +55,22 @@ export default function HexWarsPage() {
 
   // Map state comes from the database, not from a client-side seed — so every visitor sees the
   // same world, and it survives a reload.
-  useMapSync()
+  const { healthy: mapIsLive } = useMapSync()
 
   const handleConquer = useCallback(
     async (input: { hexIds: string[]; url: string; protect: boolean; agreedToTerms: true }) => {
       // The server computes the price from current hex state and creates the checkout session —
       // this call never sends an amount. Ownership changes only from the verified webhook, except
       // in demo mode (no payment provider configured), which the server applies directly.
+      // Read at submit time rather than closed over. The colour is sampled asynchronously once the
+      // logo image loads, so a value captured when this callback was created is routinely stale or
+      // absent — which is precisely how every empire ended up stored as the default purple.
+      const sampledColor = useGameStore.getState().pendingBrand?.primaryColorHex
+
       const response = await fetch('/api/checkout/create-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+        body: JSON.stringify({ ...input, primaryColorHex: sampledColor }),
       })
 
       const body = await response.json().catch(() => null)
@@ -96,6 +109,15 @@ export default function HexWarsPage() {
       />
 
       <HexInspector />
+
+      {!mapIsLive && (
+        <div
+          role="status"
+          className="pointer-events-none fixed left-1/2 top-24 z-30 -translate-x-1/2 rounded-full border border-hexwars-coral/40 bg-glass px-3 py-1 text-[11px] text-hexwars-coral backdrop-blur-hud md:top-16"
+        >
+          Reconnecting to the live map…
+        </div>
+      )}
 
       {notice && (
         <div

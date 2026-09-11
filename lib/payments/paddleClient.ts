@@ -113,8 +113,24 @@ export async function createPaddleTransaction(
       throw new Error('Could not start checkout')
     }
 
+    // This URL goes straight to the buyer's browser as a redirect. Paddle's payment link can
+    // legitimately live on the merchant's own domain, so a host allow-list would break it — but it
+    // must never be anything other than https (a `javascript:` or `data:` target would run there).
+    if (!isHttpsUrl(checkoutUrl)) {
+      logger.error('Paddle returned a non-https checkout url — refusing to redirect')
+      throw new Error('Could not start checkout')
+    }
+
     return { id, checkoutUrl }
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
   }
 }
